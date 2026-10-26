@@ -590,7 +590,7 @@ async fn install_capture_firmware(
         let chip = staged.chip.clone();
         let bytes = staged.bytes;
         tauri::async_runtime::spawn_blocking(move || {
-            windows_capture_firmware::write_eeprom_firmware(&chip, &hid_instance_ids, &bytes)
+            windows_capture_firmware::write_capture_firmware(&chip, &hid_instance_ids, &bytes)
         })
         .await
         .map_err(|error| format!("Firmware operation could not finish: {error}"))??;
@@ -649,7 +649,7 @@ async fn restore_capture_firmware(port_name: String, bytes: Vec<u8>) -> Result<S
         })?;
         let hid_instance_ids = windows_devices::capture_hid_instance_ids(&port_name)?;
         tauri::async_runtime::spawn_blocking(move || {
-            windows_capture_firmware::write_eeprom_firmware(chip, &hid_instance_ids, &bytes)
+            windows_capture_firmware::write_capture_firmware(chip, &hid_instance_ids, &bytes)
         })
         .await
         .map_err(|error| format!("Firmware restore could not finish: {error}"))??;

@@ -206,11 +206,14 @@ fn version_key(version: &str) -> Option<u64> {
     (!digits.is_empty()).then(|| digits.parse().ok()).flatten()
 }
 
-pub fn write_eeprom_firmware(
+pub fn write_capture_firmware(
     chip: &str,
     instance_ids: &[String],
     bytes: &[u8],
 ) -> Result<(), String> {
+    if chip == "MS2130S" {
+        return write_ms2130s_firmware(instance_ids, bytes);
+    }
     if !matches!(chip, "MS2109" | "MS2109S") {
         return Err(format!(
             "Firmware writing for {chip} is not available in this Tauri release"
@@ -286,6 +289,288 @@ pub fn write_eeprom_firmware(
         }
     }
     Ok(())
+}
+
+fn write_ms2130s_firmware(instance_ids: &[String], bytes: &[u8]) -> Result<(), String> {
+    const SECTOR_SIZE: usize = 4096;
+    const VERIFY_SIZE: usize = 4095;
+    const MAX_BURST: usize = 60 * 1024;
+
+    if bytes.len() < VERIFY_SIZE || bytes.len() > MAX_FIRMWARE_BYTES {
+        return Err("The MS2130S firmware image is outside the supported flash range".to_string());
+    }
+    let declared_size = u16::from_be_bytes([bytes[2], bytes[3]]) as usize + 52;
+    if declared_size > bytes.len() {
+        return Err(
+            "The firmware image header declares data beyond the end of the package".to_string(),
+        );
+    }
+
+    let api = HidApi::new()
+        .map_err(|error| format!("Could not initialize Windows HID access: {error}"))?;
+    let mut matches = api
+        .device_list()
+        .filter(|device| device.vendor_id() == 0x345f && device.product_id() == 0x2132)
+        .filter(|device| {
+            let path = device.path().to_string_lossy();
+            instance_ids
+                .iter()
+                .any(|instance_id| hid_path_matches_instance(&path, instance_id))
+        });
+    let info = matches.next().ok_or_else(|| {
+        "Windows could not match the MS2130S HID path to the selected controller".to_string()
+    })?;
+    if matches.next().is_some() {
+        return Err("More than one MS2130S HID interface matched this controller".to_string());
+    }
+    let device = info
+        .open_device(&api)
+        .map_err(|error| format!("Could not open the MS2130S HID interface: {error}"))?;
+
+    let mode = detect_ms2130s_mode(&device)?;
+    if mode == 1 {
+        return Err(
+            "MS2130S connection mode V1 is not supported by this firmware writer".to_string(),
+        );
+    }
+    initialize_ms2130s_gpio(&device, mode)?;
+
+    let mut size_report = [0u8; 9];
+    size_report[0] = 1;
+    size_report[1] = 0xf4;
+    device
+        .send_feature_report(&size_report)
+        .map_err(|error| format!("Could not enter MS2130S flash mode: {error}"))?;
+    let mut size_response = [0u8; 9];
+    size_response[0] = 1;
+    let size_response_len = device
+        .get_feature_report(&mut size_response)
+        .map_err(|error| format!("Could not read MS2130S flash capacity: {error}"))?;
+    if size_response_len < 8 {
+        return Err("The MS2130S flash capacity response was too short".to_string());
+    }
+    let flash_size = u32::from_be_bytes([
+        size_response[4],
+        size_response[5],
+        size_response[6],
+        size_response[7],
+    ]) as usize;
+    if flash_size == 0 || bytes.len() > flash_size {
+        return Err(format!(
+            "The firmware image ({} bytes) does not fit the detected MS2130S flash ({} bytes)",
+            bytes.len(),
+            flash_size
+        ));
+    }
+
+    let sector_count = bytes.len().div_ceil(SECTOR_SIZE);
+    for sector in 0..sector_count {
+        let address = sector * SECTOR_SIZE;
+        erase_ms2130s_sector(&device, address)?;
+    }
+    if sector_count <= 15 && 15 * SECTOR_SIZE < flash_size {
+        erase_ms2130s_sector(&device, 15 * SECTOR_SIZE)?;
+    }
+
+    for (chunk_index, chunk) in bytes.chunks(MAX_BURST).enumerate() {
+        let address = chunk_index * MAX_BURST;
+        write_ms2130s_burst(&device, address, chunk)?;
+    }
+    std::thread::sleep(Duration::from_millis(100));
+    let readback = read_ms2130s_burst(&device, 0, VERIFY_SIZE)?;
+    if readback.as_slice() != &bytes[..VERIFY_SIZE] {
+        return Err("MS2130S flash verification failed; power-cycle the device and inspect its firmware before retrying".to_string());
+    }
+    Ok(())
+}
+
+fn detect_ms2130s_mode(device: &HidDevice) -> Result<u8, String> {
+    let mut probe = [0u8; 9];
+    probe[1] = 0xb5;
+    probe[2] = 0xff;
+    probe[3] = 0x01;
+    if device.send_feature_report(&probe).is_ok() {
+        probe[1] = 0xfc;
+        probe[2] = 0x01;
+        if device.send_feature_report(&probe).is_ok() {
+            std::thread::sleep(Duration::from_millis(100));
+            probe[1] = 0xb5;
+            probe[2] = 0xff;
+            probe[3] = 0x01;
+            if device.send_feature_report(&probe).is_ok() {
+                let mut response = [0u8; 9];
+                if device.get_feature_report(&mut response).is_ok() && response[4] == 0x13 {
+                    return Ok(1);
+                }
+            }
+        }
+    }
+
+    let mut probe = [0u8; 9];
+    probe[0] = 1;
+    probe[1] = 0xb5;
+    probe[2] = 0xff;
+    probe[3] = 0x01;
+    device
+        .send_feature_report(&probe)
+        .map_err(|error| format!("Could not determine MS2130S connection mode: {error}"))?;
+    let mut response = [0u8; 9];
+    response[0] = 1;
+    device
+        .get_feature_report(&mut response)
+        .map_err(|error| format!("Could not determine MS2130S connection mode: {error}"))?;
+    Ok(if response[..4] == probe[..4] { 3 } else { 2 })
+}
+
+fn initialize_ms2130s_gpio(device: &HidDevice, mode: u8) -> Result<(), String> {
+    let report_id = if mode == 1 { 0 } else { 1 };
+    let read8_offset = if mode == 2 { 2 } else { 3 };
+    let read16_offset = if mode == 2 { 3 } else { 4 };
+    let write8 = |address: u8, value: u8| -> Result<(), String> {
+        let mut report = [0u8; 9];
+        report[0] = report_id;
+        report[1] = 0xc6;
+        report[2] = address;
+        report[3] = value;
+        device
+            .send_feature_report(&report)
+            .map(|_| ())
+            .map_err(|error| {
+                format!("Could not initialize MS2130S GPIO register 0x{address:02x}: {error}")
+            })
+    };
+    let read8 = |address: u8| -> Result<u8, String> {
+        let mut request = [0u8; 9];
+        request[0] = report_id;
+        request[1] = 0xc5;
+        request[2] = address;
+        device.send_feature_report(&request).map_err(|error| {
+            format!("Could not read MS2130S GPIO register 0x{address:02x}: {error}")
+        })?;
+        let mut response = [0u8; 9];
+        response[0] = report_id;
+        device.get_feature_report(&mut response).map_err(|error| {
+            format!("Could not read MS2130S GPIO register 0x{address:02x}: {error}")
+        })?;
+        Ok(response[read8_offset])
+    };
+    let write16 = |address: u16, value: u8| -> Result<(), String> {
+        let mut report = [0u8; 9];
+        report[0] = report_id;
+        report[1] = 0xb6;
+        report[2] = (address >> 8) as u8;
+        report[3] = address as u8;
+        report[4] = value;
+        device
+            .send_feature_report(&report)
+            .map(|_| ())
+            .map_err(|error| {
+                format!("Could not initialize MS2130S GPIO register 0x{address:04x}: {error}")
+            })
+    };
+    let read16 = |address: u16| -> Result<u8, String> {
+        let mut request = [0u8; 9];
+        request[0] = report_id;
+        request[1] = 0xb5;
+        request[2] = (address >> 8) as u8;
+        request[3] = address as u8;
+        device.send_feature_report(&request).map_err(|error| {
+            format!("Could not read MS2130S GPIO register 0x{address:04x}: {error}")
+        })?;
+        let mut response = [0u8; 9];
+        response[0] = report_id;
+        device.get_feature_report(&mut response).map_err(|error| {
+            format!("Could not read MS2130S GPIO register 0x{address:04x}: {error}")
+        })?;
+        Ok(response[read16_offset])
+    };
+
+    let b0 = read8(0xb0)?;
+    write8(0xb0, b0 & !0x04)?;
+    let a0 = read8(0xa0)?;
+    write8(0xa0, a0 | 0x04)?;
+    let _ = read8(0xc7);
+    write8(0xc7, 0xd1)?;
+    let _ = read8(0xc8);
+    write8(0xc8, 0xc0)?;
+    let _ = read8(0xca);
+    write8(0xca, 0x00)?;
+    let f01f = read16(0xf01f)?;
+    write16(0xf01f, (f01f | 0x10) & !0x80)?;
+    Ok(())
+}
+
+fn erase_ms2130s_sector(device: &HidDevice, address: usize) -> Result<(), String> {
+    let address = u32::try_from(address)
+        .map_err(|_| "The MS2130S flash address is out of range".to_string())?;
+    let mut report = [0u8; 9];
+    report[0] = 1;
+    report[1] = 0xfb;
+    report[2] = (address >> 16) as u8;
+    report[3] = (address >> 8) as u8;
+    report[4] = address as u8;
+    device
+        .send_feature_report(&report)
+        .map(|_| ())
+        .map_err(|error| format!("MS2130S sector erase failed at 0x{address:06x}: {error}"))
+}
+
+fn write_ms2130s_burst(device: &HidDevice, address: usize, bytes: &[u8]) -> Result<(), String> {
+    let address = u32::try_from(address)
+        .map_err(|_| "The MS2130S firmware address is out of range".to_string())?;
+    let length = u16::try_from(bytes.len())
+        .map_err(|_| "An MS2130S write burst exceeds the protocol limit".to_string())?;
+    let mut start = [0u8; 9];
+    start[0] = 1;
+    start[1] = 0xe7;
+    start[2] = (address >> 24) as u8;
+    start[3] = (address >> 16) as u8;
+    start[4] = (address >> 8) as u8;
+    start[5] = address as u8;
+    start[6] = (length >> 8) as u8;
+    start[7] = length as u8;
+    device.send_feature_report(&start).map_err(|error| {
+        format!("Could not begin MS2130S flash write at 0x{address:08x}: {error}")
+    })?;
+
+    for chunk in bytes.chunks(4095) {
+        let mut packet = vec![0u8; 4096];
+        packet[0] = 0x03;
+        packet[1..1 + chunk.len()].copy_from_slice(chunk);
+        device
+            .send_feature_report(&packet)
+            .map_err(|error| format!("MS2130S flash write failed at 0x{address:08x}: {error}"))?;
+    }
+    Ok(())
+}
+
+fn read_ms2130s_burst(
+    device: &HidDevice,
+    address: usize,
+    length: usize,
+) -> Result<Vec<u8>, String> {
+    let address = u32::try_from(address)
+        .map_err(|_| "The MS2130S firmware address is out of range".to_string())?;
+    let length = u16::try_from(length)
+        .map_err(|_| "An MS2130S read burst exceeds the protocol limit".to_string())?;
+    let mut start = [0u8; 9];
+    start[0] = 1;
+    start[1] = 0xe7;
+    start[2] = (address >> 24) as u8;
+    start[3] = (address >> 16) as u8;
+    start[4] = (address >> 8) as u8;
+    start[5] = address as u8;
+    start[6] = (length >> 8) as u8;
+    start[7] = length as u8;
+    device
+        .send_feature_report(&start)
+        .map_err(|error| format!("Could not begin MS2130S flash verification: {error}"))?;
+    let mut packet = vec![0u8; 4096];
+    packet[0] = 0x03;
+    device
+        .get_feature_report(&mut packet)
+        .map_err(|error| format!("Could not read back MS2130S flash: {error}"))?;
+    Ok(packet[1..1 + length as usize].to_vec())
 }
 
 pub fn read_eeprom_firmware(chip: &str, instance_ids: &[String]) -> Result<Vec<u8>, String> {

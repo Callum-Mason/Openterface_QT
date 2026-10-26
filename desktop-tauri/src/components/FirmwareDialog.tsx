@@ -27,7 +27,8 @@ export function FirmwareDialog({
 }: FirmwareDialogProps) {
   if (!open) return null;
   const busy = reading || checking || installing || backingUp;
-  const canInstall = chip === "MS2109" || chip === "MS2109S";
+  const canInstall = chip === "MS2109" || chip === "MS2109S" || chip === "MS2130S";
+  const canBackup = chip === "MS2109" || chip === "MS2109S";
 
   return (
     <Dialog
@@ -44,7 +45,7 @@ export function FirmwareDialog({
         <button className="button button-secondary" type="button" onClick={onReadVersion} disabled={busy || !chip || !portName}>
           {reading ? "Reading…" : "Read version"}
         </button>
-        {canInstall && <button className="button button-secondary" type="button" onClick={onBackup} disabled={busy || !portName}>{backingUp ? "Backing up…" : "Back up .bin"}</button>}
+        {canBackup && <button className="button button-secondary" type="button" onClick={onBackup} disabled={busy || !portName}>{backingUp ? "Backing up…" : "Back up .bin"}</button>}
         {canInstall && <button className="button button-secondary" type="button" onClick={onRestore} disabled={busy || !portName}>Restore .bin</button>}
         {updateCheck?.updateAvailable && canInstall && <button className="button button-danger" type="button" onClick={onInstall} disabled={busy}>Install update</button>}
         <button className="button button-primary" type="button" onClick={onCheckUpdate} disabled={busy || !chip || !portName}>
@@ -69,7 +70,7 @@ export function FirmwareDialog({
       {chip?.includes("recovery") && <p className="firmware-message" role="status">This device is in recovery mode. Firmware recovery is not available yet.</p>}
       {error && <p className="firmware-error" role="alert">{error}</p>}
       {installResult && <p className="firmware-message" role="status">{installResult}</p>}
-      <p className="firmware-note">MS2109 and MS2109S updates, backups, and restores are supported. Other capture-chip flash flows are still being migrated.</p>
+      <p className="firmware-note">MS2109 and MS2109S support updates, backups, and restores. MS2130S supports SPI updates and restores; backups are not available yet.</p>
     </Dialog>
   );
 }
