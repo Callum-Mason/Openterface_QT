@@ -181,7 +181,7 @@ impl Default for AppPreferences {
             recording_audio_bitrate: 128_000,
             recording_audio_sample_rate: 44_100,
             recording_output_path: String::new(),
-            capture_quality: "1080p60".to_string(),
+            capture_quality: "1080p30".to_string(),
             capture_system_shortcuts: false,
             inhibit_screen_saver: false,
             controller_mode: 2,
@@ -249,7 +249,7 @@ fn save_preferences(preferences: AppPreferences, app: tauri::AppHandle) -> Resul
             .any(|(id, _)| *id == preferences.keyboard_layout)
         || !matches!(
             preferences.capture_quality.as_str(),
-            "720p30" | "1080p30" | "1080p60"
+            "720p30" | "1080p30"
         )
     {
         return Err("The supplied preferences are invalid".to_string());
@@ -767,7 +767,7 @@ fn connect_device(
                 probe_errors.join("; ")
             )
         })?;
-    port.set_timeout(Duration::from_millis(10))
+    port.set_timeout(Duration::from_millis(3))
         .map_err(|error| format!("Could not configure controller response polling: {error}"))?;
 
     let connection_id = state.connection_id.fetch_add(1, Ordering::SeqCst) + 1;
@@ -971,7 +971,7 @@ fn apply_controller_mode(
             Ok(mut reopened) => match probe_controller(&mut *reopened, false) {
                 Ok(()) => {
                     reopened
-                        .set_timeout(Duration::from_millis(10))
+                        .set_timeout(Duration::from_millis(3))
                         .map_err(|error| {
                             format!("Could not configure controller polling: {error}")
                         })?;
@@ -1088,7 +1088,7 @@ fn apply_baud_rate(
             Ok(mut reopened) => match probe_controller(&mut *reopened, false) {
                 Ok(()) => {
                     reopened
-                        .set_timeout(Duration::from_millis(10))
+                        .set_timeout(Duration::from_millis(3))
                         .map_err(|error| {
                             format!("Could not configure controller polling: {error}")
                         })?;
@@ -1165,7 +1165,7 @@ fn factory_reset_controller(
                 Ok(mut reopened) => match probe_controller(&mut *reopened, false) {
                     Ok(()) => {
                         reopened
-                            .set_timeout(Duration::from_millis(10))
+                        .set_timeout(Duration::from_millis(3))
                             .map_err(|error| {
                                 format!("Could not configure controller polling: {error}")
                             })?;
@@ -1412,7 +1412,7 @@ fn reset_serial_connection(
         .map_err(|error| format!("Could not reopen {port_name} at {baud_rate} baud: {error}"))?;
     probe_controller(&mut *port, false)
         .map_err(|error| format!("The controller port reopened, but did not respond: {error}"))?;
-    port.set_timeout(Duration::from_millis(10))
+    port.set_timeout(Duration::from_millis(3))
         .map_err(|error| format!("Could not restore controller response polling: {error}"))?;
 
     {
@@ -1492,7 +1492,11 @@ fn write_port_command(port: &mut dyn SerialPort, mut command: Vec<u8>) -> std::i
         .iter()
         .fold(0u8, |sum, byte| sum.wrapping_add(*byte));
     command.push(checksum);
-    port.write_all(&command)
+    port.write_all(&command)?;
+    // Wait for this HID report to leave the OS serial queue before accepting
+    // another one. Without backpressure, rapid pointer and key events can pile
+    // up in the Windows driver and arrive noticeably late at 9600 baud.
+    port.flush()
 }
 
 #[tauri::command]

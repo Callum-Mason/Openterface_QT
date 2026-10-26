@@ -42,7 +42,7 @@ export type ControllerStatus = {
   scrollLock: boolean;
 };
 
-export type CapturePreset = "720p30" | "1080p30" | "1080p60";
+export type CapturePreset = "720p30" | "1080p30";
 export type MouseMode = "absolute" | "relative";
 export type UsbRoute = "unknown" | "host" | "target";
 export type RecordingStatus = "idle" | "recording" | "paused" | "stopping";

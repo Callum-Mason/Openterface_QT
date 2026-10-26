@@ -110,7 +110,6 @@ export function PreferencesDialog({
           <select value={capturePreset} onChange={(event) => onCapturePresetChange(event.target.value as CapturePreset)}>
             <option value="720p30">1280 × 720 at 30 fps</option>
             <option value="1080p30">1920 × 1080 at 30 fps</option>
-            <option value="1080p60">1920 × 1080 at 60 fps</option>
           </select>
         </label>
         <label className="preference-slider"><span>Recording bitrate <strong>{(recordingVideoBitrate / 1_000_000).toFixed(1)} Mbps</strong></span>

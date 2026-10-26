@@ -52,7 +52,6 @@ function compareReleaseVersions(current: string, latest: string) {
 const capturePresetConstraints: Record<CapturePreset, { width: number; height: number; frameRate: number }> = {
   "720p30": { width: 1280, height: 720, frameRate: 30 },
   "1080p30": { width: 1920, height: 1080, frameRate: 30 },
-  "1080p60": { width: 1920, height: 1080, frameRate: 60 },
 };
 
 function readPreference(key: string, fallback = "") {
@@ -186,8 +185,8 @@ function App() {
   });
   const [recordingOutputPath, setRecordingOutputPath] = useState(() => readPreference("recording-output-path"));
   const [capturePreset, setCapturePreset] = useState<CapturePreset>(() => {
-    const stored = readPreference("capture-quality", "1080p60");
-    return stored in capturePresetConstraints ? stored as CapturePreset : "1080p60";
+    const stored = readPreference("capture-quality", "1080p30");
+    return stored in capturePresetConstraints ? stored as CapturePreset : "1080p30";
   });
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [resetConfirmationOpen, setResetConfirmationOpen] = useState(false);
@@ -585,7 +584,7 @@ function App() {
           setRecordingAudioBitrate(Number.isInteger(saved.recordingAudioBitrate) && saved.recordingAudioBitrate >= 32_000 && saved.recordingAudioBitrate <= 512_000 ? saved.recordingAudioBitrate : 128_000);
           setRecordingAudioSampleRate([22_050, 44_100, 48_000, 96_000].includes(saved.recordingAudioSampleRate) ? saved.recordingAudioSampleRate : 44_100);
           setRecordingOutputPath(saved.recordingOutputPath || "");
-          setCapturePreset(saved.captureQuality in capturePresetConstraints ? saved.captureQuality : "1080p60");
+          setCapturePreset(saved.captureQuality in capturePresetConstraints ? saved.captureQuality : "1080p30");
           setCaptureSystemShortcuts(saved.captureSystemShortcuts);
           setInhibitScreenSaver(saved.inhibitScreenSaver);
           setControllerMode(saved.controllerMode >= 0 && saved.controllerMode <= 3 ? saved.controllerMode : 2);
