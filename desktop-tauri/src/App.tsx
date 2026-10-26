@@ -1,39 +1,23 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent, WheelEvent } from "react";
+import type { PointerEvent, WheelEvent } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
-import openterfaceIcon from "../../images/icon_32.png";
-import {
-  AudioLines,
-  Camera,
-  ChevronDown,
-  ClipboardPaste,
-  Circle,
-  ExternalLink,
-  ImageDown,
-  Info,
-  Keyboard,
-  Maximize,
-  MoreHorizontal,
-  MousePointer2,
-  Pause,
-  Play,
-  Plug,
-  RefreshCw,
-  Settings2,
-  Square,
-  ZoomIn,
-  ZoomOut,
-  Usb,
-  Video,
-  X,
-} from "lucide-react";
-import { isLanguageCode, languageOptions, loadLanguage, setActiveLanguage, translate, type LanguageCode } from "./i18n";
+import { Camera, Settings2, Video, X } from "lucide-react";
+import { isLanguageCode, loadLanguage, setActiveLanguage, type LanguageCode } from "./i18n";
+import type { AppPreferences, CapturePreset, ControllerStatus, ExternalDestination, KeyboardLayoutInfo, KvmDevice, MouseMode, RecordingStatus, ReleaseSummary, UsbRoute } from "./types";
+import { AboutDialog } from "./components/AboutDialog";
+import { AppMenu, type AppMenuActions } from "./components/AppMenu";
+import { CommandBar } from "./components/CommandBar";
+import { FactoryResetDialog, ResetConfirmationDialog } from "./components/ConfirmDialogs";
+import { DeviceRail } from "./components/DeviceRail";
+import { EnvironmentDialog } from "./components/EnvironmentDialog";
+import { PreferencesDialog } from "./components/PreferencesDialog";
+import { StatusBar } from "./components/StatusBar";
+import { TitleBar } from "./components/TitleBar";
+import { UpdateDialog } from "./components/UpdateDialog";
 
-type ExternalDestination = "website" | "purchase" | "feedback" | "releases";
-type ReleaseSummary = { version: string; title: string; notes: string; updateAvailable: boolean };
 const externalDestinations: Record<ExternalDestination, string> = {
   website: "https://openterface.com/",
   purchase: "https://www.crowdsupply.com/techxartisan/openterface-mini-kvm",
@@ -59,49 +43,6 @@ function compareReleaseVersions(current: string, latest: string) {
   return false;
 }
 
-type KvmDevice = {
-  portName: string;
-  manufacturer: string | null;
-  product: string | null;
-  serialNumber: string | null;
-  vendorId: number | null;
-  productId: number | null;
-  controller: string | null;
-  generation: string | null;
-  cameraName: string | null;
-  hasHid: boolean;
-  hasCamera: boolean;
-  hasAudio: boolean;
-};
-
-type ControllerStatus = {
-  targetConnected: boolean;
-  numLock: boolean;
-  capsLock: boolean;
-  scrollLock: boolean;
-};
-
-type CapturePreset = "720p30" | "1080p30" | "1080p60";
-type MouseMode = "absolute" | "relative";
-type UsbRoute = "unknown" | "host" | "target";
-type RecordingStatus = "idle" | "recording" | "paused" | "stopping";
-type AppPreferences = {
-  language: LanguageCode;
-  preferredControllerPort: string;
-  preferredVideoDevice: string;
-  preferredAudioDevice: string;
-  audioVolume: number;
-  captureQuality: CapturePreset;
-  captureSystemShortcuts: boolean;
-  inhibitScreenSaver: boolean;
-  controllerMode: number;
-  mouseMode: MouseMode;
-  mouseAutoHide: boolean;
-  keyboardLayout: string;
-};
-
-type KeyboardLayoutInfo = { id: string; name: string };
-
 const capturePresetConstraints: Record<CapturePreset, { width: number; height: number; frameRate: number }> = {
   "720p30": { width: 1280, height: 720, frameRate: 30 },
   "1080p30": { width: 1920, height: 1080, frameRate: 30 },
@@ -114,374 +55,6 @@ function readPreference(key: string, fallback = "") {
   } catch {
     return fallback;
   }
-}
-
-type PreferencesDialogProps = {
-  open: boolean;
-  onClose: () => void;
-  language: LanguageCode;
-  onLanguageChange: (language: LanguageCode) => void;
-  devices: KvmDevice[];
-  selectedPort: string;
-  onSelectPort: (port: string) => void;
-  controllerSelectionDisabled: boolean;
-  connected: boolean;
-  controllerType: string | null;
-  baudRate: number;
-  baudRateApplying: boolean;
-  onBaudRateChange: (baudRate: number) => void;
-  onApplyBaudRate: () => void;
-  controllerMode: number;
-  modeApplying: boolean;
-  onControllerModeChange: (mode: number) => void;
-  onApplyControllerMode: () => void;
-  videoDevices: MediaDeviceInfo[];
-  videoDeviceId: string;
-  onSelectVideo: (deviceId: string) => void;
-  audioDevices: MediaDeviceInfo[];
-  audioDeviceId: string;
-  onSelectAudioDevice: (deviceId: string) => void;
-  onRefreshAudioDevices: () => void;
-  audioEnabled: boolean;
-  audioStarting: boolean;
-  onToggleAudio: (enabled: boolean) => void;
-  audioVolume: number;
-  onAudioVolumeChange: (volume: number) => void;
-  capturePreset: CapturePreset;
-  onCapturePresetChange: (preset: CapturePreset) => void;
-  captureSystemShortcuts: boolean;
-  onCaptureSystemShortcutsChange: (enabled: boolean) => void;
-  inhibitScreenSaver: boolean;
-  onInhibitScreenSaverChange: (enabled: boolean) => void;
-  mouseMode: MouseMode;
-  onMouseModeChange: (mode: MouseMode) => void;
-  mouseAutoHide: boolean;
-  onMouseAutoHideChange: (enabled: boolean) => void;
-  keyboardLayouts: KeyboardLayoutInfo[];
-  keyboardLayout: string;
-  onKeyboardLayoutChange: (layout: string) => void;
-};
-
-function PreferencesDialog({
-  open, onClose, language, onLanguageChange, devices, selectedPort, onSelectPort, controllerSelectionDisabled, videoDevices, videoDeviceId,
-  onSelectVideo, capturePreset, onCapturePresetChange, captureSystemShortcuts,
-  audioDevices, audioDeviceId, onSelectAudioDevice, onRefreshAudioDevices, audioEnabled, audioStarting, onToggleAudio, audioVolume, onAudioVolumeChange,
-  onCaptureSystemShortcutsChange, inhibitScreenSaver, onInhibitScreenSaverChange,
-  mouseMode, onMouseModeChange, mouseAutoHide, onMouseAutoHideChange,
-  keyboardLayouts, keyboardLayout, onKeyboardLayoutChange,
-  connected, controllerType, baudRate, baudRateApplying, onBaudRateChange, onApplyBaudRate,
-  controllerMode, modeApplying, onControllerModeChange, onApplyControllerMode,
-}: PreferencesDialogProps) {
-  useEffect(() => {
-    if (!open) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [open, onClose]);
-
-  if (!open) return null;
-
-  return (
-    <div className="preferences-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section className="preferences-dialog" role="dialog" aria-modal="true" aria-labelledby="preferences-title">
-        <header className="preferences-header">
-          <div><h2 id="preferences-title">{translate("Preferences")}</h2></div>
-          <button className="icon-button" type="button" aria-label="Close preferences" onClick={onClose}><X size={17} /></button>
-        </header>
-        <div className="preferences-body">
-          <section className="preference-section" aria-labelledby="application-preferences-title">
-            <div className="preference-section-heading"><Settings2 size={16} /><div><h3 id="application-preferences-title">{translate("Application")}</h3><p>{translate("Choose the language used by the application.")}</p></div></div>
-            <label className="preference-field"><span>{translate("Language")}</span>
-              <select value={language} onChange={(event) => { if (isLanguageCode(event.target.value)) onLanguageChange(event.target.value); }}>
-                {languageOptions.map((option) => <option key={option.code} value={option.code}>{option.label}</option>)}
-              </select>
-            </label>
-          </section>
-          <section className="preference-section" aria-labelledby="device-preferences-title">
-            <div className="preference-section-heading"><Usb size={16} /><div><h3 id="device-preferences-title">{translate("Devices")}</h3><p>{translate("Choose which hardware to use when available.")}</p></div></div>
-            <label className="preference-field"><span>Preferred controller</span>
-              <select value={selectedPort} onChange={(event) => onSelectPort(event.target.value)} disabled={devices.length === 0 || controllerSelectionDisabled}>
-                {devices.length === 0 && <option value="">No controller detected</option>}
-                {devices.map((device) => <option key={device.portName} value={device.portName}>{[device.controller, device.portName].filter(Boolean).join(" · ")}</option>)}
-              </select>
-            </label>
-            <label className="preference-field"><span>Preferred video input</span>
-              <select value={videoDeviceId} onChange={(event) => onSelectVideo(event.target.value)} disabled={videoDevices.length === 0}>
-                {videoDevices.length === 0 && <option value="">Connect a controller to discover inputs</option>}
-                {videoDevices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Video input ${index + 1}`}</option>)}
-              </select>
-            </label>
-            <label className="preference-field"><span>Controller baud rate</span>
-              <select value={baudRate} onChange={(event) => onBaudRateChange(Number(event.target.value))} disabled={!connected || controllerType === "CH32V208" || baudRateApplying}>
-                <option value={9600}>9600</option>
-                <option value={115200}>115200</option>
-              </select>
-            </label>
-            {controllerType === "CH32V208" && <p className="preference-note">CH32V208 controllers use 115200 baud.</p>}
-            {controllerType !== "CH32V208" && <div className="preference-action-row">
-              <button className="button button-secondary" type="button" onClick={onApplyBaudRate} disabled={!connected || ![9600, 115200].includes(baudRate) || baudRateApplying}>
-                {baudRateApplying ? "Restarting controller…" : "Apply baud rate and restart"}
-              </button>
-            </div>}
-            {controllerType === "CH9329" && <p className="preference-note">The controller saves this rate and restarts. The target USB connection may pause briefly.</p>}
-          </section>
-
-          <section className="preference-section" aria-labelledby="video-preferences-title">
-            <div className="preference-section-heading"><Camera size={16} /><div><h3 id="video-preferences-title">{translate("Video capture")}</h3><p>{translate("Choose a preferred size and frame rate for the USB capture source.")}</p></div></div>
-            <label className="preference-field"><span>Capture quality</span>
-              <select value={capturePreset} onChange={(event) => onCapturePresetChange(event.target.value as CapturePreset)}>
-                <option value="720p30">1280 × 720 at 30 fps</option>
-                <option value="1080p30">1920 × 1080 at 30 fps</option>
-                <option value="1080p60">1920 × 1080 at 60 fps</option>
-              </select>
-            </label>
-            <p className="preference-note">The capture device may use a lower mode if the selected quality is unavailable. Video recordings use this source and save as WebM without audio.</p>
-          </section>
-
-          <section className="preference-section" aria-labelledby="audio-preferences-title">
-            <div className="preference-section-heading"><AudioLines size={16} /><div><h3 id="audio-preferences-title">{translate("Audio pass-through")}</h3><p>{translate("Route audio from the selected capture input to the Windows default output.")}</p></div></div>
-            <label className="preference-field"><span>Audio input</span>
-              <select value={audioDeviceId} onChange={(event) => onSelectAudioDevice(event.target.value)} disabled={audioDevices.length === 0 || audioStarting}>
-                {audioDevices.length === 0 && <option value="">No audio inputs detected</option>}
-                {audioDevices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Audio input ${index + 1}`}</option>)}
-              </select>
-            </label>
-            <div className="preference-action-row"><button className="button button-secondary" type="button" onClick={onRefreshAudioDevices} disabled={audioStarting}><RefreshCw size={14} />Refresh audio inputs</button></div>
-            <label className="preference-switch"><span><strong>Enable live audio</strong><small>{audioStarting ? "Requesting audio access…" : audioEnabled ? "Playing through the Windows default output." : "Audio access is requested only when enabled."}</small></span>
-              <input type="checkbox" checked={audioEnabled} onChange={(event) => onToggleAudio(event.target.checked)} disabled={!audioDeviceId || audioStarting} />
-            </label>
-            <label className="preference-slider"><span>Output volume <strong>{audioVolume}%</strong></span><input type="range" min="0" max="100" step="1" value={audioVolume} onChange={(event) => onAudioVolumeChange(Number(event.target.value))} disabled={!audioEnabled} /></label>
-            <p className="preference-note">Choose an Openterface audio input. Audio is not included in WebM recordings in this build.</p>
-          </section>
-
-          <section className="preference-section" aria-labelledby="controller-mode-title">
-            <div className="preference-section-heading"><Usb size={16} /><div><h3 id="controller-mode-title">{translate("Target controller mode")}</h3><p>{translate("Choose the USB keyboard and mouse profile presented to the target.")}</p></div></div>
-            <label className="preference-field"><span>Operating mode</span>
-              <select value={controllerMode} onChange={(event) => onControllerModeChange(Number(event.target.value))}>
-                <option value={0}>Performance: keyboard, mouse and custom HID</option>
-                <option value={1}>Keyboard only</option>
-                <option value={2}>Compatibility: keyboard and mouse</option>
-                <option value={3}>Custom HID</option>
-              </select>
-            </label>
-            {controllerType === "CH32V208" && <p className="preference-note">CH32V208 firmware does not support mode changes.</p>}
-            {controllerType === "CH9329" && <p className="preference-note">Applying a mode writes the controller configuration, resets it, and briefly disconnects the target USB device.</p>}
-            {!controllerType && <p className="preference-note">Connect a CH9329 controller to apply an operating mode.</p>}
-            <div className="preference-action-row">
-              <button className="button button-secondary" type="button" onClick={onApplyControllerMode} disabled={!connected || controllerType !== "CH9329" || modeApplying}>
-                {modeApplying ? "Restarting controller…" : "Apply and restart controller"}
-              </button>
-            </div>
-          </section>
-
-          <section className="preference-section" aria-labelledby="pointer-preferences-title">
-            <div className="preference-section-heading"><MousePointer2 size={16} /><div><h3 id="pointer-preferences-title">{translate("Pointer control")}</h3><p>{translate("Choose how mouse movement reaches the target computer.")}</p></div></div>
-            <label className="preference-field"><span>Mouse mode</span>
-              <select value={mouseMode} onChange={(event) => onMouseModeChange(event.target.value as MouseMode)}>
-                <option value="absolute">Absolute: point to a position</option>
-                <option value="relative">Relative: capture movement</option>
-              </select>
-            </label>
-            <p className="preference-note">In relative mode, click the target display to capture the pointer. Press Escape to release it.</p>
-            <label className="preference-switch preference-switch-secondary"><span><strong>Hide pointer over target</strong><small>Show the host pointer again outside the display.</small></span>
-              <input type="checkbox" checked={mouseAutoHide} onChange={(event) => onMouseAutoHideChange(event.target.checked)} />
-            </label>
-          </section>
-
-          <section className="preference-section" aria-labelledby="keyboard-preferences-title">
-            <div className="preference-section-heading"><Keyboard size={16} /><div><h3 id="keyboard-preferences-title">{translate("Keyboard and Windows")}</h3><p>{translate("Control shortcut forwarding and Windows idle behavior.")}</p></div></div>
-            <label className="preference-field"><span>Target keyboard layout</span>
-              <select value={keyboardLayout} onChange={(event) => onKeyboardLayoutChange(event.target.value)}>
-                {keyboardLayouts.map((layout) => <option key={layout.id} value={layout.id}>{layout.name}</option>)}
-              </select>
-            </label>
-            <p className="preference-note">This layout is used when typing clipboard text on the target. Unsupported characters are skipped and reported.</p>
-            <label className="preference-switch"><span><strong>Capture system shortcuts</strong><small>Alt+Tab and the Windows key while target control is active.</small></span>
-              <input type="checkbox" checked={captureSystemShortcuts} onChange={(event) => onCaptureSystemShortcutsChange(event.target.checked)} />
-            </label>
-            <p className="preference-note">Ctrl+Alt+Delete remains reserved by Windows.</p>
-            <label className="preference-switch preference-switch-secondary"><span><strong>Inhibit screen saver</strong><small>Keep the display and system awake while enabled.</small></span>
-              <input type="checkbox" checked={inhibitScreenSaver} onChange={(event) => onInhibitScreenSaverChange(event.target.checked)} />
-            </label>
-          </section>
-        </div>
-        <footer className="preferences-footer"><span>Changes are saved automatically.</span><button className="button button-secondary" type="button" onClick={onClose}>Done</button></footer>
-      </section>
-    </div>
-  );
-}
-
-type AboutDialogProps = {
-  open: boolean;
-  version: string;
-  onClose: () => void;
-  onOpenLink: (destination: ExternalDestination) => void;
-};
-
-function AboutDialog({ open, version, onClose, onOpenLink }: AboutDialogProps) {
-  useEffect(() => {
-    if (!open) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [open, onClose]);
-
-  if (!open) return null;
-
-  return (
-    <div className="about-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section className="about-dialog" role="dialog" aria-modal="true" aria-labelledby="about-title">
-        <header className="about-header">
-          <div className="about-brand">
-            <img src={openterfaceIcon} width="40" height="40" alt="" />
-            <div><h2 id="about-title">Openterface Mini-KVM</h2><p>Desktop control console</p></div>
-          </div>
-          <button className="icon-button" type="button" aria-label="Close about dialog" onClick={onClose}><X size={17} /></button>
-        </header>
-        <div className="about-body">
-          <p>View and control a target computer with the Mini-KVM.</p>
-          <dl className="about-version"><dt>Version</dt><dd>{version}</dd></dl>
-          <div className="about-links" aria-label="Openterface links">
-            <button className="text-action" type="button" onClick={() => onOpenLink("website")}>Website <ExternalLink size={14} /></button>
-            <button className="text-action" type="button" onClick={() => onOpenLink("purchase")}>Purchase <ExternalLink size={14} /></button>
-            <button className="text-action" type="button" onClick={() => onOpenLink("feedback")}>Feedback <ExternalLink size={14} /></button>
-            <button className="text-action" type="button" onClick={() => onOpenLink("releases")}>Releases <ExternalLink size={14} /></button>
-          </div>
-        </div>
-        <footer className="about-footer"><button className="button button-secondary" type="button" onClick={onClose}>Done</button></footer>
-      </section>
-    </div>
-  );
-}
-
-type EnvironmentDialogProps = {
-  open: boolean;
-  rows: { label: string; value: string }[];
-  copied: boolean;
-  onClose: () => void;
-  onCopy: () => void;
-};
-
-function EnvironmentDialog({ open, rows, copied, onClose, onCopy }: EnvironmentDialogProps) {
-  useEffect(() => {
-    if (!open) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [open, onClose]);
-
-  if (!open) return null;
-  return (
-    <div className="about-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section className="about-dialog environment-dialog" role="dialog" aria-modal="true" aria-labelledby="environment-title">
-        <header className="about-header"><div><h2 id="environment-title">Environment report</h2><p>System and device details for troubleshooting.</p></div><button className="icon-button" type="button" aria-label="Close environment report" onClick={onClose}><X size={17} /></button></header>
-        <div className="about-body">
-          <dl className="environment-list">{rows.map((row) => <div key={row.label}><dt>{row.label}</dt><dd>{row.value}</dd></div>)}</dl>
-          <details className="environment-runtime"><summary>Runtime details</summary><p>{navigator.userAgent}</p></details>
-        </div>
-        <footer className="about-footer environment-footer"><span className="copy-status" role="status">{copied ? "Report copied." : "Only the details shown here are copied."}</span><button className="button button-secondary" type="button" onClick={onClose}>Close</button><button className="button button-primary" type="button" onClick={onCopy}>Copy report</button></footer>
-      </section>
-    </div>
-  );
-}
-
-type UpdateDialogProps = {
-  open: boolean;
-  currentVersion: string;
-  release: ReleaseSummary | null;
-  loading: boolean;
-  error: string;
-  onClose: () => void;
-  onOpenReleases: () => void;
-};
-
-function UpdateDialog({ open, currentVersion, release, loading, error, onClose, onOpenReleases }: UpdateDialogProps) {
-  useEffect(() => {
-    if (!open) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !loading) onClose();
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [open, loading, onClose]);
-
-  if (!open) return null;
-  return (
-    <div className="about-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !loading) onClose(); }}>
-      <section className="about-dialog update-dialog" role="dialog" aria-modal="true" aria-labelledby="update-title">
-        <header className="about-header"><div><h2 id="update-title">Check for updates</h2><p>Openterface Mini-KVM desktop</p></div><button className="icon-button" type="button" aria-label="Close update check" onClick={onClose} disabled={loading}><X size={17} /></button></header>
-        <div className="about-body" aria-live="polite">
-          {loading && <p>Checking the latest GitHub release…</p>}
-          {!loading && error && <p className="update-error" role="alert">{error}</p>}
-          {!loading && !error && release && (release.updateAvailable ? <>
-            <p className="update-state">A newer version is available.</p>
-            <dl className="about-version"><dt>Current version</dt><dd>{currentVersion}</dd></dl>
-            <dl className="about-version"><dt>Latest version</dt><dd>{release.version}</dd></dl>
-            {release.title && <h3 className="update-release-title">{release.title}</h3>}
-            {release.notes && <p className="update-notes">{release.notes}</p>}
-          </> : <p className="update-state">You’re up to date. Current version: {currentVersion}.</p>)}
-        </div>
-        <footer className="about-footer environment-footer"><button className="button button-secondary" type="button" onClick={onClose} disabled={loading}>Close</button><button className="button button-primary" type="button" onClick={onOpenReleases} disabled={loading}>Open releases</button></footer>
-      </section>
-    </div>
-  );
-}
-
-type ResetConfirmationProps = {
-  open: boolean;
-  busy: boolean;
-  onClose: () => void;
-  onConfirm: () => void;
-};
-
-function ResetConfirmationDialog({ open, busy, onClose, onConfirm }: ResetConfirmationProps) {
-  useEffect(() => {
-    if (!open) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !busy) onClose();
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [open, busy, onClose]);
-
-  if (!open) return null;
-  return (
-    <div className="preferences-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
-      <section className="preferences-dialog confirmation-dialog" role="alertdialog" aria-modal="true" aria-labelledby="reset-connection-title" aria-describedby="reset-connection-copy">
-        <header className="preferences-header"><h2 id="reset-connection-title">Reset serial connection?</h2></header>
-        <div className="preferences-body confirmation-copy"><p id="reset-connection-copy">The controller connection will close and reopen at its current baud rate. Video may pause briefly; saved settings will stay unchanged.</p></div>
-        <footer className="preferences-footer confirmation-footer"><button className="button button-secondary" type="button" onClick={onClose} disabled={busy}>Cancel</button><button className="button button-primary" type="button" onClick={onConfirm} disabled={busy}>{busy ? "Resetting…" : "Reset connection"}</button></footer>
-      </section>
-    </div>
-  );
-}
-
-function FactoryResetDialog({ open, busy, onClose, onConfirm }: ResetConfirmationProps) {
-  useEffect(() => {
-    if (!open) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !busy) onClose();
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [open, busy, onClose]);
-
-  if (!open) return null;
-  return (
-    <div className="preferences-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
-      <section className="preferences-dialog confirmation-dialog" role="alertdialog" aria-modal="true" aria-labelledby="factory-reset-title" aria-describedby="factory-reset-copy">
-        <header className="preferences-header"><h2 id="factory-reset-title">Factory reset HID controller?</h2></header>
-        <div className="preferences-body confirmation-copy"><p id="factory-reset-copy">This resets the controller hardware to its defaults. The baud rate and controller mode may change, and the target USB connection will restart.</p></div>
-        <footer className="preferences-footer confirmation-footer"><button className="button button-secondary" type="button" onClick={onClose} disabled={busy}>Cancel</button><button className="button button-danger" type="button" onClick={onConfirm} disabled={busy}>{busy ? "Resetting controller…" : "Factory reset"}</button></footer>
-      </section>
-    </div>
-  );
 }
 
 const keyUsages: Record<string, number> = {
@@ -551,14 +124,6 @@ async function enumerateAudioInputs() {
   } catch {
     return [];
   }
-}
-
-function formatRecordingDuration(durationMs: number) {
-  const totalSeconds = Math.floor(durationMs / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
 }
 
 function App() {
@@ -1801,134 +1366,117 @@ function App() {
     void invoke("send_mouse_report", { x, y, buttons: heldButtons.current, wheel }).catch((cause) => setError(String(cause)));
   };
 
-  const navigateApplicationMenu = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (!appMenuOpen || !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-    const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]')];
-    if (items.length === 0) return;
-    event.preventDefault();
-    const current = items.indexOf(document.activeElement as HTMLButtonElement);
-    const next = event.key === "Home" ? 0
-      : event.key === "End" ? items.length - 1
-        : event.key === "ArrowDown" ? (current + 1 + items.length) % items.length
-          : (current - 1 + items.length) % items.length;
-    items[next]?.focus();
+  const menuActions: AppMenuActions = {
+    preferences: () => setPreferencesOpen(true),
+    paste: () => void pasteToTarget(),
+    screenshot: takeScreenshot,
+    toggleRecording: () => { if (recordingStatus === "idle") startRecording(); else void stopRecording(); },
+    setMouseMode: switchMouseMode,
+    zoomIn,
+    zoomOut,
+    resetZoom,
+    fullscreen: () => void toggleFullscreen(),
+    resetConnection: () => setResetConfirmationOpen(true),
+    factoryReset: () => setFactoryResetOpen(true),
+    environment: () => { setEnvironmentCopied(false); setEnvironmentOpen(true); },
+    checkForUpdates: () => void checkForUpdates(),
+    about: () => setAboutOpen(true),
+    website: () => void openExternalLink("website"),
+    feedback: () => void openExternalLink("feedback"),
+    releases: () => void openExternalLink("releases"),
+    closeWindow: () => void closeWindow(),
   };
 
   return (
-    <div className="app-shell">
-      <header className="topbar">
-        <div className="brand-lockup">
-          <img src={openterfaceIcon} width="30" height="30" alt="" />
-          <div><strong>Openterface</strong><span>Mini-KVM</span></div>
-        </div>
-        <div className="topbar-context">{translate("Live console")}</div>
-        <div className="topbar-actions">
-          <span className={`connection-pill ${connected ? "connected" : ""}`} role="status" aria-live="polite">{translate(connected ? "Connected" : "Disconnected")}</span>
-          <button className="icon-button" type="button" aria-label="Refresh USB devices" title="Refresh USB devices" onClick={() => void refreshDevices()} disabled={loadingDevices}>
-            <RefreshCw size={16} className={loadingDevices ? "spin" : ""} />
-          </button>
-          <button className="icon-button" type="button" aria-label="Open preferences" title="Preferences" onClick={() => setPreferencesOpen(true)}>
-            <Settings2 size={17} />
-          </button>
-          <div className="app-menu-wrap" ref={appMenuRef}>
-            <button ref={appMenuTriggerRef} className="icon-button" type="button" aria-label="Open application menu" title="Application menu" aria-haspopup="menu" aria-expanded={appMenuOpen} onClick={() => setAppMenuOpen((open) => !open)}>
-              <MoreHorizontal size={17} />
+    <div className={`app-shell ${fullscreenActive ? "is-fullscreen" : ""}`}>
+      {!fullscreenActive && (
+        <TitleBar
+          connected={connected}
+          onClose={() => void closeWindow()}
+          actions={<>
+            <button className="icon-button" type="button" aria-label="Open preferences" title="Preferences" onClick={() => setPreferencesOpen(true)}>
+              <Settings2 size={16} />
             </button>
-            {appMenuOpen && <div className="app-menu" role="menu" aria-label="Application menu" onKeyDown={navigateApplicationMenu}>
-              <div className="app-menu-heading">{translate("Application")}</div>
-              <button role="menuitem" type="button" onClick={() => { setAppMenuOpen(false); setPreferencesOpen(true); }}><Settings2 size={15} /><span>{translate("Preferences")}</span><kbd>Ctrl+P</kbd></button>
-              <button role="menuitem" type="button" onClick={() => void pasteToTarget()} disabled={!connected || appliedControllerMode === 3 || pasting}><ClipboardPaste size={15} /><span>{pasting ? "Pasting to target…" : "Paste to target"}</span><kbd>Ctrl+Shift+V</kbd></button>
-              <button role="menuitem" type="button" onClick={() => { setAppMenuOpen(false); takeScreenshot(); }} disabled={!videoStream}><ImageDown size={15} /><span>Save target screenshot</span><kbd>Ctrl+Shift+S</kbd></button>
-              <button role="menuitem" type="button" onClick={() => { setAppMenuOpen(false); setAboutOpen(true); }}><Info size={15} /><span>{translate("About Openterface")}</span><kbd>F1</kbd></button>
-              <button role="menuitem" type="button" onClick={() => { setAppMenuOpen(false); setEnvironmentCopied(false); setEnvironmentOpen(true); }}><Info size={15} /><span>Environment report</span><kbd>Ctrl+E</kbd></button>
-              <div className="app-menu-rule" />
-              <button role="menuitem" type="button" onClick={() => void openExternalLink("website")}><ExternalLink size={15} /><span>Website</span></button>
-              <button role="menuitem" type="button" onClick={() => void openExternalLink("feedback")}><ExternalLink size={15} /><span>Send feedback</span></button>
-              <button role="menuitem" type="button" onClick={() => void checkForUpdates()} disabled={updateChecking}><RefreshCw size={15} /><span>{translate(updateChecking ? "Checking for updates…" : "Check for updates")}</span><kbd>Ctrl+U</kbd></button>
-              <button role="menuitem" type="button" onClick={() => void openExternalLink("releases")}><ExternalLink size={15} /><span>View releases</span></button>
-              <div className="app-menu-rule" />
-              <div className="app-menu-heading">{translate("Device")}</div>
-              <button role="menuitem" type="button" onClick={() => { setAppMenuOpen(false); setResetConfirmationOpen(true); }} disabled={!connected || resettingConnection}><RefreshCw size={15} /><span>{translate(resettingConnection ? "Resetting connection…" : "Reset serial connection")}</span></button>
-              <button role="menuitem" type="button" onClick={() => { setAppMenuOpen(false); setFactoryResetOpen(true); }} disabled={!connected || factoryResetting}><RefreshCw size={15} /><span>{translate(factoryResetting ? "Resetting HID controller…" : "Factory reset HID controller")}</span></button>
-              <div className="app-menu-rule" />
-              <div className="app-menu-heading">{translate("Control")}</div>
-              <button role="menuitem" type="button" onClick={() => { setAppMenuOpen(false); if (recordingStatus === "idle") startRecording(); else void stopRecording(); }} disabled={!videoStream || recordingStatus === "stopping"}><Circle size={15} /><span>{recordingStatus === "idle" ? "Start video recording" : "Stop and save recording"}</span><kbd>Ctrl+Shift+R</kbd></button>
-              <button role="menuitemradio" aria-checked={mouseMode === "absolute"} type="button" onClick={() => switchMouseMode("absolute")}><MousePointer2 size={15} /><span>Absolute mouse</span><kbd>Ctrl+Alt+A</kbd></button>
-              <button role="menuitemradio" aria-checked={mouseMode === "relative"} type="button" onClick={() => switchMouseMode("relative")}><MousePointer2 size={15} /><span>Relative mouse</span><kbd>Ctrl+T</kbd></button>
-              <div className="app-menu-rule" />
-              <div className="app-menu-heading">{translate("View")}</div>
-              <button role="menuitem" type="button" onClick={() => { setAppMenuOpen(false); zoomIn(); }}><ZoomIn size={15} /><span>Zoom in</span><kbd>Ctrl++</kbd></button>
-              <button role="menuitem" type="button" onClick={() => { setAppMenuOpen(false); zoomOut(); }}><ZoomOut size={15} /><span>Zoom out</span><kbd>Ctrl+-</kbd></button>
-              <button role="menuitem" type="button" onClick={() => { setAppMenuOpen(false); resetZoom(); }}><ZoomIn size={15} /><span>Actual size</span><kbd>Ctrl+0</kbd></button>
-              <div className="app-menu-rule" />
-              <div className="app-menu-heading">{translate("Window")}</div>
-              <button role="menuitem" type="button" onClick={() => { setAppMenuOpen(false); void toggleFullscreen(); }}><Maximize size={15} /><span>{translate(fullscreenActive ? "Exit full screen" : "Full screen")}</span><kbd>Alt+F11</kbd></button>
-              <div className="app-menu-rule" />
-              <button role="menuitem" type="button" onClick={() => void closeWindow()}><X size={15} /><span>{translate("Close window")}</span><kbd>Ctrl+Q</kbd></button>
+            <AppMenu
+              open={appMenuOpen}
+              onOpenChange={setAppMenuOpen}
+              wrapRef={appMenuRef}
+              triggerRef={appMenuTriggerRef}
+              actions={menuActions}
+              connected={connected}
+              hasVideo={!!videoStream}
+              pasting={pasting}
+              pasteDisabled={appliedControllerMode === 3}
+              recordingStatus={recordingStatus}
+              mouseMode={mouseMode}
+              fullscreenActive={fullscreenActive}
+              updateChecking={updateChecking}
+              resettingConnection={resettingConnection}
+              factoryResetting={factoryResetting}
+            />
+          </>}
+        />
+      )}
+
+      <div className="workspace">
+        <DeviceRail
+          devices={devices}
+          selectedPort={selectedPort}
+          onSelectPort={setSelectedPort}
+          selectedDevice={selectedDevice}
+          connected={connected}
+          connecting={connecting}
+          loadingDevices={loadingDevices}
+          controllerStatus={controllerStatus}
+          hasVideo={!!videoStream}
+          videoInputCount={videoDevices.length}
+          usbRoute={usbRoute}
+          switchingUsbRoute={switchingUsbRoute}
+          onSwitchRoute={(route) => void switchUsbRoute(route)}
+          onConnect={() => void connect()}
+          onDisconnect={() => void disconnect()}
+          onScan={() => void refreshDevices()}
+          connectionLabel={connectionLabel}
+          controllerMode={appliedControllerMode}
+          mouseMode={mouseMode}
+          onOpenPreferences={() => setPreferencesOpen(true)}
+        />
+
+        <main className="main-area">
+          {(error || videoError) && <div className="banner banner-error" role="alert"><span>{error || videoError}</span><button type="button" aria-label="Dismiss error" onClick={() => { setError(""); setVideoError(""); }}><X size={14} /></button></div>}
+          {noticeMessage && <div className="banner" role="status"><span>{noticeMessage}</span><button type="button" aria-label="Dismiss notification" onClick={() => setNoticeMessage("")}><X size={14} /></button></div>}
+
+          <CommandBar
+            connected={connected}
+            hasVideo={!!videoStream}
+            targetName={targetName}
+            videoDevices={videoDevices}
+            videoDeviceId={videoDeviceId}
+            onSelectVideo={(deviceId) => { setVideoDeviceId(deviceId); void openVideo(deviceId); }}
+            recordingStatus={recordingStatus}
+            recordingDurationMs={recordingDurationMs}
+            onStartRecording={startRecording}
+            onStopRecording={() => void stopRecording()}
+            onTogglePause={toggleRecordingPause}
+            zoom={videoZoom}
+            onZoomIn={zoomIn}
+            onZoomOut={zoomOut}
+            onScreenshot={takeScreenshot}
+            fullscreenActive={fullscreenActive}
+            onToggleFullscreen={() => void toggleFullscreen()}
+          />
+
+          <div className={`video-stage ${videoStream ? "has-video" : ""} ${mouseAutoHide && controlActive ? "auto-hide-cursor" : ""}`} tabIndex={connected ? 0 : -1} aria-label={connected ? "Target display, keyboard and mouse control active when focused" : "Target display unavailable until a device is connected"} onPointerEnter={() => setControlActive(true)} onPointerLeave={() => { setControlActive(false); if (heldKeys.current.size) { heldKeys.current.clear(); void sendKeys(); } void releaseMouseButtons(); }} onFocus={() => setControlActive(true)}>
+            {videoStream ? <video ref={videoRef} style={{ transform: `scale(${videoZoom})` }} autoPlay playsInline muted onContextMenu={(event) => event.preventDefault()} onPointerMove={sendPointer} onPointerDown={(event) => setPointerButton(event, true)} onPointerUp={(event) => setPointerButton(event, false)} onPointerLeave={(event) => { if (heldButtons.current) { heldButtons.current = 0; sendPointer(event); } }} onWheel={scroll} /> : <div className="empty-display">
+              <Video size={20} strokeWidth={1.5} aria-hidden="true" />
+              <div className="empty-copy"><h2>{connected ? "No video signal" : "No target display"}</h2><p>{connected ? "Select a capture source to view the connected computer." : "Connect a Mini-KVM to view its video input."}</p></div>
+              {connected && <button className="button button-secondary" type="button" onClick={() => void openVideo()}><Camera size={14} />Choose video input</button>}
             </div>}
           </div>
-        </div>
-      </header>
 
-      <main className="main-area">
-        <section className="page-content">
-          <div className="page-heading">
-            <div><h1>{translate("Live console")}</h1><p>{translate("Connect the Mini-KVM to view and control a target computer.")}</p></div>
-          </div>
-
-          <section className="control-strip" aria-label="Connection controls">
-            <div className="device-picker">
-              <Usb size={18} aria-hidden="true" />
-              <div className="picker-copy"><label htmlFor="device-port">Device</label>
-                <select id="device-port" value={selectedPort} onChange={(event) => setSelectedPort(event.target.value)} disabled={connected || connecting || devices.length === 0}>
-                  {devices.length === 0 && <option value="">No controller detected</option>}
-                  {devices.map((device) => <option key={device.portName} value={device.portName}>{device.controller ? `${device.controller} · ${device.portName}` : `${device.portName} · USB serial`}</option>)}
-                </select>
-              </div>
-              <ChevronDown size={15} className="picker-chevron" aria-hidden="true" />
-            </div>
-            <div className="strip-divider" />
-            <div className="quick-status"><span className="status-name">Controller</span><strong>{connected ? selectedDevice?.controller ?? "Online" : "Offline"}</strong></div>
-            <div className="quick-status"><span className="status-name">Target USB</span><strong>{connected && controllerStatus ? controllerStatus.targetConnected ? "Connected" : "Disconnected" : connected ? "Checking…" : "—"}</strong></div>
-            <div className="quick-status"><span className="status-name">Video input</span><strong>{videoStream ? "Live capture" : videoDevices.length ? `${videoDevices.length} available` : selectedDevice?.hasCamera ? "Available" : "Not detected"}</strong></div>
-            <div className="route-switch" role="group" aria-label="Switchable USB route">
-              <span>USB route</span>
-              <div className="route-switch-buttons">
-                <button type="button" aria-pressed={usbRoute === "host"} className={usbRoute === "host" ? "selected" : ""} disabled={!connected || switchingUsbRoute} onClick={() => void switchUsbRoute("host")}>{switchingUsbRoute ? "Switching…" : "Host"}</button>
-                <button type="button" aria-pressed={usbRoute === "target"} className={usbRoute === "target" ? "selected" : ""} disabled={!connected || switchingUsbRoute} onClick={() => void switchUsbRoute("target")}>{switchingUsbRoute ? "Switching…" : "Target"}</button>
-              </div>
-            </div>
-            <div className="strip-spacer" />
-            {connected ? <button className="button button-secondary" type="button" onClick={() => void disconnect()}><X size={15} />Disconnect</button> : <button className="button button-primary" type="button" onClick={() => void connect()} disabled={!selectedPort || loadingDevices || connecting}><Plug size={15} />{connecting ? "Connecting…" : "Connect device"}</button>}
-          </section>
-
-          {(error || videoError) && <div className="error-banner" role="alert">{error || videoError}<button type="button" aria-label="Dismiss error" onClick={() => { setError(""); setVideoError(""); }}><X size={15} /></button></div>}
-          {noticeMessage && <div className="notice-banner" role="status">{noticeMessage}<button type="button" aria-label="Dismiss notification" onClick={() => setNoticeMessage("")}><X size={15} /></button></div>}
-
-          <section className="console-card" aria-label="Target display">
-            <div className="console-toolbar">
-              <div className="console-title"><strong>Target display</strong><span className="target-name">{videoStream ? targetName : "No signal"}</span></div>
-              <div className="console-tools">{connected && videoDevices.length > 1 && <select className="video-select" aria-label="Video capture device" value={videoDeviceId} onChange={(event) => { setVideoDeviceId(event.target.value); void openVideo(event.target.value); }}>{videoDevices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Video device ${index + 1}`}</option>)}</select>}{videoStream && <span className="resolution">Live</span>}{recordingStatus === "idle" ? <button className="console-tool recording-start" type="button" aria-label="Start video recording" title="Start video recording (Ctrl+Shift+R)" onClick={startRecording} disabled={!videoStream}><Circle size={15} fill="currentColor" /></button> : <><span className={`recording-clock ${recordingStatus === "recording" ? "is-recording" : ""}`} role="status"><span className="recording-dot" />{recordingStatus === "paused" ? `Paused ${formatRecordingDuration(recordingDurationMs)}` : recordingStatus === "stopping" ? "Saving" : formatRecordingDuration(recordingDurationMs)}</span><button className="console-tool" type="button" aria-label={recordingStatus === "paused" ? "Resume recording" : "Pause recording"} title={recordingStatus === "paused" ? "Resume recording" : "Pause recording"} onClick={toggleRecordingPause} disabled={recordingStatus === "stopping"}>{recordingStatus === "paused" ? <Play size={15} /> : <Pause size={15} />}</button><button className="console-tool" type="button" aria-label="Stop and save recording" title="Stop and save recording" onClick={() => void stopRecording()} disabled={recordingStatus === "stopping"}><Square size={15} fill="currentColor" /></button></>}<button className="console-tool" type="button" aria-label="Zoom out" title="Zoom out (Ctrl+-)" onClick={zoomOut}><ZoomOut size={15} /></button><span className="zoom-indicator" aria-label={`Zoom ${Math.round(videoZoom * 100)} percent`}>{Math.round(videoZoom * 100)}%</span><button className="console-tool" type="button" aria-label="Zoom in" title="Zoom in (Ctrl++)" onClick={zoomIn}><ZoomIn size={15} /></button><button className="console-tool" type="button" aria-label="Save target screenshot" title="Save target screenshot (Ctrl+Shift+S)" onClick={takeScreenshot} disabled={!videoStream}><ImageDown size={15} /></button><button className="console-tool" type="button" aria-label={fullscreenActive ? "Exit full screen" : "Enter full screen"} title="Toggle full screen (Alt+F11)" onClick={() => void toggleFullscreen()}><Maximize size={15} /></button></div>
-            </div>
-            <div className={`video-stage ${videoStream ? "has-video" : ""} ${mouseAutoHide && controlActive ? "auto-hide-cursor" : ""}`} tabIndex={connected ? 0 : -1} aria-label={connected ? "Target display, keyboard and mouse control active when focused" : "Target display unavailable until a device is connected"} onPointerEnter={() => setControlActive(true)} onPointerLeave={() => { setControlActive(false); if (heldKeys.current.size) { heldKeys.current.clear(); void sendKeys(); } void releaseMouseButtons(); }} onFocus={() => setControlActive(true)}>
-              {videoStream ? <video ref={videoRef} style={{ transform: `scale(${videoZoom})` }} autoPlay playsInline muted onContextMenu={(event) => event.preventDefault()} onPointerMove={sendPointer} onPointerDown={(event) => setPointerButton(event, true)} onPointerUp={(event) => setPointerButton(event, false)} onPointerLeave={(event) => { if (heldButtons.current) { heldButtons.current = 0; sendPointer(event); } }} onWheel={scroll} /> : <div className="empty-display">
-                <Video size={20} strokeWidth={1.5} aria-hidden="true" />
-                <div className="empty-copy"><h2>{connected ? "No video signal" : "No target display"}</h2><p>{connected ? "Select a capture source to view the connected computer." : "Connect a Mini-KVM to view its video input."}</p></div>
-                {connected && <button className="button button-secondary" type="button" onClick={() => void openVideo()}><Camera size={15} />Choose video input</button>}
-              </div>}
-            </div>
-            <div className="console-footer"><div className="footer-left"><span>{connected ? "Session active" : "Session idle"}</span><span className="footer-separator" />{appliedControllerMode !== 1 && appliedControllerMode !== 3 && <span className="footer-hint"><MousePointer2 size={13} />{mouseMode === "relative" ? "Relative mouse" : "Absolute mouse"}</span>}{appliedControllerMode !== 3 && <span className="footer-hint"><Keyboard size={13} />Keyboard</span>}</div><div className={`footer-right ${audioEnabled ? "audio-active" : ""}`}><AudioLines size={15} /><span>{audioStarting ? "Audio starting" : audioEnabled ? `Audio live (${audioVolume}%)` : "Audio off"}</span></div></div>
-          </section>
-
-          <section className="bottom-row" aria-label="Device information">
-            <div className="info-card"><Usb size={17} aria-hidden="true" /><div><strong>{connected ? selectedDevice?.controller ?? "Controller connected" : "Ready to connect"}</strong><span>{connected ? connectionLabel : selectedDevice?.generation ?? "Connect an Openterface device to begin."}</span></div><button className="text-action" type="button" onClick={() => void refreshDevices()} disabled={loadingDevices}>{loadingDevices ? "Scanning…" : "Scan devices"}<RefreshCw size={14} /></button></div>
-            <div className="tip-card">
-              <div className="tip-copy"><strong>{appliedControllerMode === 3 ? "Custom HID mode" : appliedControllerMode === 1 ? "Keyboard control" : "Keyboard and mouse"}</strong><span>{appliedControllerMode === 3 ? "Custom HID input is not yet available in this Tauri build." : appliedControllerMode === 1 ? "Click the target display to send keyboard input." : mouseMode === "relative" ? "Click the target display to capture the pointer. Press Escape to release it." : "Click the target display to send keyboard and mouse input."}</span></div>
-              <button className="text-action" type="button" onClick={() => setPreferencesOpen(true)}>Keyboard preferences <Settings2 size={14} /></button>
-            </div>
-          </section>
-        </section>
-      </main>
+          <StatusBar connected={connected} controllerMode={appliedControllerMode} mouseMode={mouseMode} audioStarting={audioStarting} audioEnabled={audioEnabled} audioVolume={audioVolume} />
+        </main>
+      </div>
       <PreferencesDialog
         open={preferencesOpen}
         onClose={() => setPreferencesOpen(false)}
