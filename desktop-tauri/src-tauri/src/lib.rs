@@ -1492,11 +1492,25 @@ fn write_port_command(port: &mut dyn SerialPort, mut command: Vec<u8>) -> std::i
         .iter()
         .fold(0u8, |sum, byte| sum.wrapping_add(*byte));
     command.push(checksum);
-    port.write_all(&command)?;
-    // Wait for this HID report to leave the OS serial queue before accepting
-    // another one. Without backpressure, rapid pointer and key events can pile
-    // up in the Windows driver and arrive noticeably late at 9600 baud.
-    port.flush()
+    // The short timeout used by the reader is also applied to writes. At 9600
+    // baud it can expire before a full HID report is accepted, so temporarily
+    // allow enough time for USB-serial drivers to drain the packet.
+    let read_timeout = port.timeout();
+    port.set_timeout(Duration::from_millis(250))
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?;
+
+    let write_result = port.write_all(&command).and_then(|_| {
+        // Wait for this HID report to leave the OS serial queue before
+        // accepting another one, so old pointer positions cannot accumulate.
+        port.flush()
+    });
+    let restore_result = port
+        .set_timeout(read_timeout)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error));
+
+    write_result?;
+    restore_result?;
+    Ok(())
 }
 
 #[tauri::command]
