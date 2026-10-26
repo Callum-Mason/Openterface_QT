@@ -156,7 +156,7 @@ export function WchFirmwareDialog({ open, onClose }: WchFirmwareDialogProps) {
         <button className="button button-danger" type="button" onClick={() => void flash()} disabled={flashing}>{flashing ? "Flashing…" : "Flash controller"}</button>
       </>}
     >
-      <p id="wch-firmware-confirm-copy">This erases and overwrites the connected <span className="mono">{selected?.chipName ?? "WCH controller"}</span> with <span className="mono">{image?.fileName ?? "the selected image"}</span>. Keep it connected until verification and reset finish.</p>
+      <p id="wch-firmware-confirm-copy">This erases and overwrites the connected <span className="mono">{selected?.chipName ?? "WCH controller"}</span> with <span className="mono">{image?.fileName ?? "the selected image"}</span>. If code flash is protected, the app clears its read protection and resets the controller first. Keep it connected until verification and reset finish.</p>
     </Dialog>}
   </>;
 }

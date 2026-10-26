@@ -264,7 +264,7 @@ fn chip_info(chip_id: u8, device_type: u8) -> ChipInfo {
 }
 
 struct WchFlasher<'a> {
-    transport: &'a WchTransport,
+    transport: &'a mut WchTransport,
     chip: ChipInfo,
     uid: Vec<u8>,
     xor_key: [u8; 8],
@@ -272,7 +272,11 @@ struct WchFlasher<'a> {
 }
 
 impl<'a> WchFlasher<'a> {
-    fn connect(transport: &'a WchTransport, chip_id: u8, device_type: u8) -> Result<Self, String> {
+    fn connect(
+        transport: &'a mut WchTransport,
+        chip_id: u8,
+        device_type: u8,
+    ) -> Result<Self, String> {
         let payload = transport.command(&identify_packet(0, 0))?;
         if payload.len() < 2 || payload[0] != chip_id || payload[1] != device_type {
             return Err("The WCH ISP device changed after scanning".to_string());
@@ -318,7 +322,7 @@ impl<'a> WchFlasher<'a> {
         self.xor_key[7] = self.xor_key[7].wrapping_add(self.chip.chip_id);
     }
 
-    fn flash(&self, raw: &[u8]) -> Result<(), String> {
+    fn flash(&mut self, raw: &[u8]) -> Result<(), String> {
         if self.chip.flash_size == 0 {
             return Err("The WCH ISP reported an unsupported chip model".to_string());
         }
@@ -331,7 +335,7 @@ impl<'a> WchFlasher<'a> {
             ));
         }
         if self.protected {
-            return Err("Code flash is protected. Unprotect it with the WCH ISP utility, reconnect in ISP mode, and retry.".to_string());
+            self.unprotect()?;
         }
 
         let sectors = (padded.len() / FLASH_SECTOR_SIZE + 1)
@@ -381,6 +385,56 @@ impl<'a> WchFlasher<'a> {
         let _ = self.transport.command(&packet(0xa2, &[1]));
         std::thread::sleep(Duration::from_secs(2));
         Ok(())
+    }
+
+    fn unprotect(&mut self) -> Result<(), String> {
+        let payload = self.transport.command(&packet(0xa7, &[0x07, 0]))?;
+        if payload.len() < 14 {
+            return Err("WCH unprotect config response was too short".to_string());
+        }
+
+        let mut config = payload[2..14].to_vec();
+        config[0] = 0xa5;
+        config[1] = 0x5a;
+        config[8..12].fill(0xff);
+        let mut write_config = vec![0x07, 0];
+        write_config.extend(config);
+        self.transport.command(&packet(0xa8, &write_config))?;
+
+        // WCH applies the protection change only after a reset. The bootloader
+        // may disconnect before replying, so closing and rescanning is expected.
+        let _ = self.transport.command(&packet(0xa2, &[1]));
+        self.transport.close();
+
+        for _ in 0..10 {
+            std::thread::sleep(Duration::from_secs(2));
+            let devices = self.transport.scan();
+            let Some(device) = devices.iter().find(|device| {
+                device.chip_id == self.chip.chip_id && device.device_type == self.chip.device_type
+            }) else {
+                continue;
+            };
+            if self.transport.open(device.index).is_err() {
+                continue;
+            }
+            let identified = self
+                .transport
+                .command(&identify_packet(self.chip.chip_id, self.chip.device_type))
+                .is_ok();
+            if !identified {
+                self.transport.close();
+                continue;
+            }
+
+            self.read_config()?;
+            self.derive_key();
+            if self.protected {
+                return Err("WCH controller remains protected after the reset".to_string());
+            }
+            return Ok(());
+        }
+
+        Err("WCH controller did not reconnect after clearing code-flash protection".to_string())
     }
 
     fn send_key(&self) -> Result<(), String> {
@@ -436,7 +490,7 @@ pub fn flash_device(
         })?;
     let expected_chip = (selected.chip_id, selected.device_type);
     transport.open(index)?;
-    let flasher = WchFlasher::connect(&transport, expected_chip.0, expected_chip.1)?;
+    let mut flasher = WchFlasher::connect(&mut transport, expected_chip.0, expected_chip.1)?;
     flasher.flash(&firmware)?;
     transport.close();
     Ok(format!(
