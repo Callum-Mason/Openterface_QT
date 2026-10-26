@@ -1127,6 +1127,8 @@ function App() {
 
   useEffect(() => {
     const handleApplicationShortcut = (event: KeyboardEvent) => {
+      // While the target has control, shortcuts belong to the target too.
+      if (connected && controlActive) return;
       const modifier = event.ctrlKey || event.metaKey;
       if (event.ctrlKey && event.shiftKey && event.code === "KeyV") {
         event.preventDefault();
@@ -1179,7 +1181,7 @@ function App() {
     };
     window.addEventListener("keydown", handleApplicationShortcut);
     return () => window.removeEventListener("keydown", handleApplicationShortcut);
-  }, [checkForUpdates, closeWindow, openExternalLink, pasteToTarget, recordingStatus, resetZoom, startRecording, stopRecording, switchMouseMode, takeScreenshot, toggleFullscreen, zoomIn, zoomOut]);
+  }, [checkForUpdates, closeWindow, connected, controlActive, openExternalLink, pasteToTarget, recordingStatus, resetZoom, startRecording, stopRecording, switchMouseMode, takeScreenshot, toggleFullscreen, zoomIn, zoomOut]);
 
   const refreshDevices = useCallback(async () => {
     if (!isTauri()) {
@@ -1725,12 +1727,9 @@ function App() {
     if (!connected) return;
     const down = (event: KeyboardEvent) => {
       if (!controlActive) return;
-      if (event.code === "F1" || event.ctrlKey && ["KeyP", "KeyQ", "KeyT", "KeyU"].includes(event.code) || event.ctrlKey && event.altKey && event.code === "KeyA") return;
-      if (event.altKey && event.code === "F11" || event.ctrlKey && event.shiftKey && ["KeyS", "KeyV"].includes(event.code) || event.ctrlKey && (event.key === "+" || ["Minus", "NumpadAdd", "NumpadSubtract", "Digit0", "Numpad0"].includes(event.code))) return;
-      if (event.ctrlKey && ["KeyR", "KeyW", "KeyT", "KeyL"].includes(event.code)) event.preventDefault();
-      if (event.code === "F11" || event.code === "F5") event.preventDefault();
-      if (event.repeat || !keyUsages[event.code] && !modifierBits[event.code]) return;
+      if (!keyUsages[event.code] && !modifierBits[event.code]) return;
       event.preventDefault();
+      if (event.repeat) return;
       heldKeys.current.add(event.code);
       void sendKeys();
     };
