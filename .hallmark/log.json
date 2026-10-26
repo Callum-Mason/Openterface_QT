@@ -1,0 +1,62 @@
+[
+ {
+  "date": "2026-10-26",
+  "mode": "redesign",
+  "depth": "polish",
+  "scope": "app",
+  "theme": "Technical utilitarian, existing dark KVM palette",
+  "screen": "Mini-KVM live console with application menu, About dialog, and pointer controls",
+  "kept": [
+   "live console and device controls",
+   "existing Openterface destinations and version identity"
+  ],
+  "added": [
+   "application menu",
+   "About dialog",
+   "Preferences, About, releases, and close shortcuts",
+   "absolute and relative mouse modes with Escape release",
+   "saved host cursor auto-hide preference"
+  ],
+  "signature": "Large target display with live keyboard and mouse control",
+  "waived": [
+   "28b: live video element has no poster because no target-display frame was supplied"
+  ],
+  "sweep": "0 FAIL, 0 WARN, 1 WAIVED; render tier unavailable because puppeteer-core is not installed; finish review requires recapture",
+  "prompt": "Migrate the remaining Qt application shell actions into the Tauri control desk."
+ },
+ {
+  "date": "2026-10-26",
+  "mode": "redesign",
+  "depth": "full",
+  "scope": "app",
+  "theme": "Technical utilitarian, existing dark KVM palette",
+  "axes": [
+   "compactness",
+   "contrast",
+   "operational clarity"
+  ],
+  "screen": "Mini-KVM live console with controller selection, target display, connection status, and keyboard/mouse controls",
+  "states": [
+   "device scan empty/loading/error/full",
+   "disconnected",
+   "connected without video",
+   "connected with live video",
+   "capture error"
+  ],
+  "signature": "Large target display with live keyboard and mouse control",
+  "photos": [],
+  "waived": [
+   "28b: live video element has no poster because no target-display frame was supplied; the empty state identifies the missing signal"
+  ],
+  "sweep": "0 FAIL, 0 WARN, 1 WAIVED; render tier unavailable because puppeteer-core is not installed",
+  "prompt": "Redesign the Openterface Mini-KVM desktop as a clean, compact dark control desk, preserving device discovery, video, keyboard, and mouse behavior."
+ },
+ {
+  "date": "2026-10-26",
+  "mode": "redesign",
+  "depth": "full",
+  "scope": "app",
+  "theme": "Technical utilitarian, existing dark KVM palette",
+  "prompt": "Openterface Mini-KVM live console"
+ }
+]

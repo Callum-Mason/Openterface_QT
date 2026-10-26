@@ -1,0 +1,36 @@
+[package]
+name = "openterface-desktop"
+version = "0.1.0"
+description = "Openterface Mini-KVM desktop application"
+authors = ["Openterface"]
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "openterface_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serialport = { version = "4.7", default-features = false }
+tauri = { version = "2", features = [] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Devices_DeviceAndDriverInstallation",
+  "Win32_Foundation",
+  "Win32_System_Threading",
+  "Win32_System_DataExchange",
+  "Win32_System_Memory",
+  "Win32_System_Power",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

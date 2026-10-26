@@ -86,6 +86,10 @@ Makefile
 build-cmake/
 build-qmake/
 build-shared-app/
+desktop-tauri/node_modules/
+desktop-tauri/dist/
+desktop-tauri/.npm-cache/
+desktop-tauri/src-tauri/target/
 
 # Test MCP build artifacts
 tests/mcp/.qt/

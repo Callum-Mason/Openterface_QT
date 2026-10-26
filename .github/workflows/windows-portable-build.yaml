@@ -1,10 +1,6 @@
-name: Build / Openterface Windows Portable (Static)
+name: Legacy Qt Windows Portable (manual fallback)
 
 on:
-  push:
-    branches: [ main, "dev_260624_MCPserver" ]
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
 
 env:

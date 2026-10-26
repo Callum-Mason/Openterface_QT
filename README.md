@@ -1,4 +1,6 @@
-# Openterface Mini-KVM QT Edition
+# Openterface Mini-KVM Desktop
+
+> **Windows desktop migration:** The active Windows x64 application is the Rust + React + Tauri project in [`desktop-tauri/`](desktop-tauri/README.md). Its installer is built by the `Build Openterface Tauri Windows x64` workflow. Qt sources remain in the repository as the behavior reference during the staged port, and are excluded from the active Windows build. The latest published release remains the existing Qt app until the Tauri version is ready to replace it.
 
 **Control your target computer remotely with keyboard, video, and mouse over a single USB connection.**
 
@@ -15,7 +17,7 @@ Openterface Mini-KVM is a **compact KVM (Keyboard-Video-Mouse) switch** that let
 - 🏢 Data center and lab management
 - 📱 Controlling phones, tablets, and ARM devices
 
-> **Note:** This is the QT version for Linux & Windows. Currently in active development with feature parity improvements underway.
+> **Note:** The published application is the Qt version. The Windows x64 Tauri app is being migrated feature by feature; the two builds currently have different feature sets.
 
 ---
 
@@ -38,10 +40,7 @@ Openterface Mini-KVM is a **compact KVM (Keyboard-Video-Mouse) switch** that let
 ## Quick Start
 
 ### 🪟 Windows
-1. Download the latest installer from [Releases](https://github.com/TechxArtisanStudio/Openterface_QT/releases)  
-2. Run the installer (it installs drivers + app automatically)
-3. Launch **Openterface Mini-KVM** from your Start Menu
-4. Connect your Mini-KVM device via USB
+The latest [published release](https://github.com/TechxArtisanStudio/Openterface_QT/releases) is the current Qt app. To preview the Windows x64 Tauri migration build, download the `openterface-windows-x64-nsis` artifact from a successful [Tauri Windows build](https://github.com/TechxArtisanStudio/Openterface_QT/actions/workflows/windows-tauri.yaml). It currently provides device serial discovery, live UVC capture, and keyboard/mouse input; see [`desktop-tauri/`](desktop-tauri/README.md) for build prerequisites and current limitations.
 
 ### 🐧 Linux (Ubuntu/Debian)
 
@@ -297,7 +296,13 @@ For detailed build instructions, see [docs/BUILD.md](docs/BUILD.md).
 
 Want to contribute? We'd love your help! Here's how to get started:
 
+### Windows x64 Tauri development
+
+The active Windows x64 desktop app is built with Rust, React, and Tauri. Follow the setup, development, and installer instructions in [`desktop-tauri/README.md`](desktop-tauri/README.md). The Windows x64 installer workflow is [`windows-tauri.yaml`](.github/workflows/windows-tauri.yaml).
+
 ### Setting Up Your Development Environment
+
+The CMake and Make instructions below describe the existing Qt application, which remains the reference implementation during the staged port. They do not build the active Windows x64 Tauri application.
 
 1. **Clone the repository:**
    ```bash

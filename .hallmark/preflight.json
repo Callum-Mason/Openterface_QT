@@ -1,0 +1,14 @@
+{
+  "scanned": "2026-10-26",
+  "findings": {
+    "design": "No root design.md or DESIGN.md found.",
+    "fonts": "Segoe UI, Arial, sans-serif in desktop-tauri/src/styles.css before redesign; no project font files.",
+    "palette": "Dark neutral surfaces and green controls in desktop-tauri/src/styles.css before redesign; product icon at images/icon_32.png.",
+    "spacing": "Hand-authored CSS values; no shared spacing scale before redesign.",
+    "motion": "One CSS refresh spinner; no motion library.",
+    "framework": "React 19, Vite 6 and Tauri 2 in desktop-tauri/package.json and desktop-tauri/src-tauri/Cargo.toml.",
+    "product": "Openterface Mini-KVM live console screen in desktop-tauri/src/App.tsx."
+  },
+  "preserve": ["Openterface Mini-KVM identity and supplied icon", "KVM controls and status facts", "existing connect, video, keyboard and mouse handlers"],
+  "introduce": ["compact top-bar shell", "named OKLCH color and spacing tokens", "visible keyboard focus and reduced-motion behavior", "responsive target display layout"]
+}
