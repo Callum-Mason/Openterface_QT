@@ -35,6 +35,7 @@ export type AppPreferences = {
   preferredVideoDevice: string;
   preferredAudioDevice: string;
   audioVolume: number;
+  includeAudioInRecordings: boolean;
   captureQuality: CapturePreset;
   captureSystemShortcuts: boolean;
   inhibitScreenSaver: boolean;

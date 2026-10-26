@@ -35,10 +35,10 @@ The installer is written under `src-tauri/target/x86_64-pc-windows-msvc/release/
 - Probes CH9329 at 9600 then 115200 baud with the read-only `GET_INFO` command. CH32V208 uses 115200 baud, resets its HID interface during startup, then retries `GET_INFO` before reporting a connection.
 - Grants the app WebView camera permission for UVC capture; other WebView permission requests retain the runtime default.
 - Captures a connected UVC video input through WebView2 camera access.
-- Routes audio from a selected Openterface capture input to the Windows default output with an explicit live-audio toggle and saved output volume. Audio capture permission is requested only when the user enables pass-through; recordings remain video-only.
+- Routes audio from a selected Openterface capture input to the Windows default output with an explicit live-audio toggle and saved output volume. Audio capture permission is requested when live pass-through is enabled or when a recording starts with audio enabled.
 - Sends keyboard and absolute or relative mouse reports over the connected controller, including clipboard text through the selected keyboard layout.
 - Supports CH9329 baud-rate changes, controller operating-mode changes, serial reconnect, USB routing, and an RTS hardware factory reset; CH32V208 remains limited to its supported 115200 baud mode.
-- Saves target screenshots and records video-only WebM from the selected capture source. Recording can pause, resume, and stop, follows the selected capture-quality preset, and finalizes before source changes, disconnect, or app close.
+- Saves target screenshots and records WebM from the selected capture source. Recording can pause, resume, and stop, follows the selected capture-quality preset, can optionally include audio from the selected capture input, and finalizes before source changes, disconnect, or app close.
 - Saves device preferences, capture quality, controller mode, mouse behavior, keyboard layout, Windows shortcut capture, and screen-saver behavior.
 - Offers English and 12 additional locale choices in Preferences, starts in English, remembers the selected language, and loads its existing Qt catalog on demand. Text without a matching catalog entry remains in English while coverage is expanded.
 - Provides a copyable environment report with the app/runtime version, controller and target status, selected video source, and capture settings (`Ctrl+E`).

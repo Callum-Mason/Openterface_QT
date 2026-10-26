@@ -34,6 +34,8 @@ export type PreferencesDialogProps = {
   onToggleAudio: (enabled: boolean) => void;
   audioVolume: number;
   onAudioVolumeChange: (volume: number) => void;
+  includeAudioInRecordings: boolean;
+  onIncludeAudioInRecordingsChange: (enabled: boolean) => void;
   capturePreset: CapturePreset;
   onCapturePresetChange: (preset: CapturePreset) => void;
   captureSystemShortcuts: boolean;
@@ -53,6 +55,7 @@ export function PreferencesDialog({
   open, onClose, language, onLanguageChange, devices, selectedPort, onSelectPort, controllerSelectionDisabled, videoDevices, videoDeviceId,
   onSelectVideo, capturePreset, onCapturePresetChange, captureSystemShortcuts,
   audioDevices, audioDeviceId, onSelectAudioDevice, onRefreshAudioDevices, audioEnabled, audioStarting, onToggleAudio, audioVolume, onAudioVolumeChange,
+  includeAudioInRecordings, onIncludeAudioInRecordingsChange,
   onCaptureSystemShortcutsChange, inhibitScreenSaver, onInhibitScreenSaverChange,
   mouseMode, onMouseModeChange, mouseAutoHide, onMouseAutoHideChange,
   keyboardLayouts, keyboardLayout, onKeyboardLayoutChange,
@@ -110,7 +113,7 @@ export function PreferencesDialog({
             <option value="1080p60">1920 × 1080 at 60 fps</option>
           </select>
         </label>
-        <p className="preference-note">The capture device may use a lower mode if the selected quality is unavailable. Video recordings use this source and save as WebM without audio.</p>
+        <p className="preference-note">The capture device may use a lower mode if the selected quality is unavailable. Recordings save as WebM.</p>
       </section>
 
       <section className="preference-section" aria-labelledby="audio-preferences-title">
@@ -126,7 +129,10 @@ export function PreferencesDialog({
           <input type="checkbox" checked={audioEnabled} onChange={(event) => onToggleAudio(event.target.checked)} disabled={!audioDeviceId || audioStarting} />
         </label>
         <label className="preference-slider"><span>Output volume <strong>{audioVolume}%</strong></span><input type="range" min="0" max="100" step="1" value={audioVolume} onChange={(event) => onAudioVolumeChange(Number(event.target.value))} disabled={!audioEnabled} /></label>
-        <p className="preference-note">Choose an Openterface audio input. Audio is not included in WebM recordings in this build.</p>
+        <label className="preference-switch preference-switch-secondary"><span><strong>Include capture audio in recordings</strong><small>Record from the selected input, whether or not live pass-through is enabled.</small></span>
+          <input type="checkbox" checked={includeAudioInRecordings} onChange={(event) => onIncludeAudioInRecordingsChange(event.target.checked)} disabled={!audioDeviceId} />
+        </label>
+        <p className="preference-note">Recording audio is requested only when a recording starts. The Windows microphone permission prompt may appear the first time.</p>
       </section>
 
       <section className="preference-section" aria-labelledby="controller-mode-title">

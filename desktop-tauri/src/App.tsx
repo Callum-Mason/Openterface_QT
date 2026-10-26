@@ -160,6 +160,7 @@ function App() {
     const stored = Number(readPreference("audio-volume", "80"));
     return Number.isInteger(stored) && stored >= 0 && stored <= 100 ? stored : 80;
   });
+  const [includeAudioInRecordings, setIncludeAudioInRecordings] = useState(() => readPreference("include-audio-in-recordings") === "true");
   const [capturePreset, setCapturePreset] = useState<CapturePreset>(() => {
     const stored = readPreference("capture-quality", "1080p60");
     return stored in capturePresetConstraints ? stored as CapturePreset : "1080p60";
@@ -206,6 +207,7 @@ function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const activeVideoStream = useRef<MediaStream | null>(null);
   const activeAudioStream = useRef<MediaStream | null>(null);
+  const recordingAudioStreamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioGainRef = useRef<GainNode | null>(null);
   const audioRequestId = useRef(0);
@@ -328,6 +330,7 @@ function App() {
           setVideoDeviceId(saved.preferredVideoDevice);
           setAudioDeviceId(saved.preferredAudioDevice || "");
           setAudioVolume(Number.isInteger(saved.audioVolume) && saved.audioVolume >= 0 && saved.audioVolume <= 100 ? saved.audioVolume : 80);
+          setIncludeAudioInRecordings(saved.includeAudioInRecordings);
           setCapturePreset(saved.captureQuality in capturePresetConstraints ? saved.captureQuality : "1080p60");
           setCaptureSystemShortcuts(saved.captureSystemShortcuts);
           setInhibitScreenSaver(saved.inhibitScreenSaver);
@@ -501,7 +504,7 @@ function App() {
     return () => unlisten?.();
   }, [stopRecording]);
 
-  const startRecording = useCallback(() => {
+  const startRecording = useCallback(async () => {
     const stream = activeVideoStream.current;
     if (!stream || stream.getVideoTracks().every((track) => track.readyState !== "live")) {
       setError("Connect a live video source before starting a recording.");
@@ -517,19 +520,51 @@ function App() {
       setError("This WebView does not provide a supported WebM video encoder.");
       return;
     }
+    let audioStream: MediaStream | null = null;
     try {
+      if (includeAudioInRecordings) {
+        if (!audioDeviceId) throw new Error("Choose an audio input in Preferences before recording with audio.");
+        if (!navigator.mediaDevices?.getUserMedia) throw new Error("Audio capture is unavailable in this Windows WebView.");
+        audioStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            deviceId: { exact: audioDeviceId },
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+          },
+          video: false,
+        });
+        if (!audioStream.getAudioTracks().some((track) => track.readyState === "live")) {
+          throw new Error("The selected audio input did not provide a live audio track.");
+        }
+      }
+      if (activeVideoStream.current !== stream || stream.getVideoTracks().every((track) => track.readyState !== "live")) {
+        throw new Error("The video source changed while audio access was being requested.");
+      }
       recordingChunksRef.current = [];
       recordingStopPromiseRef.current = null;
       recordingClockRef.current = { elapsedMs: 0, segmentStartedAt: Date.now() };
       setRecordingDurationMs(0);
       const videoBitsPerSecond = capturePreset === "720p30" ? 2_000_000 : capturePreset === "1080p30" ? 5_000_000 : 8_000_000;
-      const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond });
+      const recordingStream = new MediaStream([
+        ...stream.getVideoTracks(),
+        ...(audioStream?.getAudioTracks() ?? []),
+      ]);
+      const recorder = new MediaRecorder(recordingStream, {
+        mimeType,
+        videoBitsPerSecond,
+        ...(audioStream ? { audioBitsPerSecond: 128_000 } : {}),
+      });
+      recordingAudioStreamRef.current = audioStream;
+      audioStream = null;
       recorderRef.current = recorder;
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) recordingChunksRef.current.push(event.data);
       };
-      recorder.onerror = () => setError("Video recording stopped because the capture stream reported an error.");
+      recorder.onerror = () => setError("Recording stopped because the capture stream reported an error.");
       recorder.onstop = () => {
+        recordingAudioStreamRef.current?.getTracks().forEach((track) => track.stop());
+        recordingAudioStreamRef.current = null;
         const chunks = recordingChunksRef.current;
         recordingChunksRef.current = [];
         recorderRef.current = null;
@@ -551,17 +586,20 @@ function App() {
         link.click();
         link.remove();
         window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-        setNoticeMessage("Video recording saved to your Downloads folder as WebM.");
+        setNoticeMessage("Recording saved to your Downloads folder as WebM.");
       };
       recorder.start(1000);
       setRecordingStatus("recording");
     } catch (cause) {
+      audioStream?.getTracks().forEach((track) => track.stop());
+      recordingAudioStreamRef.current?.getTracks().forEach((track) => track.stop());
+      recordingAudioStreamRef.current = null;
       recorderRef.current = null;
       recordingClockRef.current = { elapsedMs: 0, segmentStartedAt: 0 };
       setRecordingStatus("idle");
-      setError(`Could not start video recording: ${String(cause)}`);
+      setError(`Could not start recording: ${String(cause)}`);
     }
-  }, [capturePreset]);
+  }, [audioDeviceId, capturePreset, includeAudioInRecordings]);
 
   const toggleRecordingPause = useCallback(() => {
     const recorder = recorderRef.current;
@@ -1224,6 +1262,7 @@ function App() {
       preferredVideoDevice: videoDeviceId || readPreference("preferred-video-device"),
       preferredAudioDevice: audioDeviceId || readPreference("preferred-audio-device"),
       audioVolume,
+      includeAudioInRecordings,
       captureQuality: capturePreset,
       captureSystemShortcuts,
       inhibitScreenSaver,
@@ -1235,7 +1274,7 @@ function App() {
     void invoke("save_preferences", { preferences }).catch((cause) => {
       setError(`Could not save preferences: ${String(cause)}`);
     });
-  }, [appliedControllerMode, audioDeviceId, audioVolume, capturePreset, captureSystemShortcuts, inhibitScreenSaver, keyboardLayout, language, mouseAutoHide, mouseMode, preferencesReady, selectedPort, videoDeviceId]);
+  }, [appliedControllerMode, audioDeviceId, audioVolume, capturePreset, captureSystemShortcuts, includeAudioInRecordings, inhibitScreenSaver, keyboardLayout, language, mouseAutoHide, mouseMode, preferencesReady, selectedPort, videoDeviceId]);
 
   useEffect(() => {
     try {
@@ -1244,6 +1283,14 @@ function App() {
       // Preferences remain active for the current session when storage is unavailable.
     }
   }, [keyboardLayout]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("include-audio-in-recordings", String(includeAudioInRecordings));
+    } catch {
+      // The Tauri preferences file remains authoritative in the desktop app.
+    }
+  }, [includeAudioInRecordings]);
 
   useEffect(() => {
     const shouldCapture = connected && controlActive && captureSystemShortcuts;
@@ -1512,6 +1559,8 @@ function App() {
         onToggleAudio={(enabled) => { if (enabled) void startAudio(); else stopAudio(); }}
         audioVolume={audioVolume}
         onAudioVolumeChange={setAudioVolume}
+        includeAudioInRecordings={includeAudioInRecordings}
+        onIncludeAudioInRecordingsChange={setIncludeAudioInRecordings}
         capturePreset={capturePreset}
         onCapturePresetChange={setCapturePreset}
         captureSystemShortcuts={captureSystemShortcuts}
