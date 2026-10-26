@@ -9,6 +9,7 @@ import { open as openDialog, save } from "@tauri-apps/plugin-dialog";
 import { open as openFile } from "@tauri-apps/plugin-fs";
 import { Settings2, Video, X } from "lucide-react";
 import { isLanguageCode, loadLanguage, setActiveLanguage, type LanguageCode } from "./i18n";
+import { mergeMouseMoves, splitRelativeMove, type MouseReportCommand } from "./mouseMotion";
 import type { AppPreferences, CapturePreset, ControllerStatus, ExternalDestination, FirmwareUpdateCheck, KeyboardLayoutInfo, KvmDevice, MouseMode, RecordingStatus, ReleaseSummary, UsbRoute } from "./types";
 import { AboutDialog } from "./components/AboutDialog";
 import { AppMenu, type AppMenuActions } from "./components/AppMenu";
@@ -54,7 +55,6 @@ const capturePresetConstraints: Record<CapturePreset, { width: number; height: n
   "1080p30": { width: 1920, height: 1080, frameRate: 30 },
 };
 
-type MouseReportCommand = "send_mouse_report" | "send_relative_mouse_report";
 type MouseReportJob = {
   command: MouseReportCommand;
   payload: Record<string, number>;
@@ -987,9 +987,10 @@ function App() {
     const completion = new Promise<void>((resolve) => {
       const jobs = mouseReportJobs.current;
       const lastJob = jobs[jobs.length - 1];
-      if (coalesceMoves && lastJob?.coalesceMoves) {
-        lastJob.command = command;
-        lastJob.payload = payload;
+      const merged = coalesceMoves && lastJob?.coalesceMoves && lastJob.command === command
+        ? mergeMouseMoves(command, lastJob.payload, payload) : null;
+      if (lastJob && merged) {
+        lastJob.payload = merged;
         lastJob.completions.push(resolve);
       } else {
         jobs.push({ command, payload, coalesceMoves, completions: [resolve] });
@@ -1001,7 +1002,16 @@ function App() {
         while (mouseReportJobs.current.length) {
           const job = mouseReportJobs.current.shift()!;
           try {
-            await invoke<void>(job.command, job.payload);
+            if (job.command === "send_relative_mouse_report" && job.coalesceMoves) {
+              let remaining = job.payload;
+              while (remaining.dx !== 0 || remaining.dy !== 0) {
+                const step = splitRelativeMove(remaining);
+                await invoke<void>(job.command, step.report);
+                remaining = step.remaining;
+              }
+            } else {
+              await invoke<void>(job.command, job.payload);
+            }
           } catch (cause) {
             setError(String(cause));
           } finally {
@@ -1757,16 +1767,15 @@ function App() {
     if (!connected || appliedControllerMode === 1 || appliedControllerMode === 3 || !videoRef.current) return;
     const now = performance.now();
     const pointerReportInterval = 16;
-    if (event.type === "pointermove" && now - lastMouseSend.current < pointerReportInterval) return;
-    lastMouseSend.current = now;
     if (mouseMode === "relative") {
-      const widthRatio = window.screen.width > 0 ? window.innerWidth / window.screen.width : 1;
-      const heightRatio = window.screen.height > 0 ? window.innerHeight / window.screen.height : 1;
-      const dx = Math.max(-127, Math.min(127, Math.trunc(event.movementX * widthRatio)));
-      const dy = Math.max(-127, Math.min(127, Math.trunc(event.movementY * heightRatio)));
+      const dx = event.type === "pointermove" ? event.movementX : 0;
+      const dy = event.type === "pointermove" ? event.movementY : 0;
+      if (event.type === "pointermove" && dx === 0 && dy === 0) return;
       void queueMouseReport("send_relative_mouse_report", { dx, dy, buttons: heldButtons.current, wheel: 0 }, event.type === "pointermove");
       return;
     }
+    if (event.type === "pointermove" && now - lastMouseSend.current < pointerReportInterval) return;
+    lastMouseSend.current = now;
     const { x, y } = targetCoordinates(event, videoRef.current, videoZoom);
     lastMousePosition.current = { x, y };
     void queueMouseReport("send_mouse_report", { x, y, buttons: heldButtons.current, wheel: 0 }, event.type === "pointermove");
