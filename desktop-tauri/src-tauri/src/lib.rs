@@ -1626,47 +1626,49 @@ fn switch_usb_route(to_target: bool, state: State<'_, AppState>) -> Result<Strin
         .serial
         .lock()
         .map_err(|_| "Serial connection state is unavailable".to_string())?;
-    let port = serial.as_mut().ok_or_else(|| {
-        "Connect an Openterface controller before switching USB routing".to_string()
-    })?;
-    if port.name().as_deref() != Some(device.port_name.as_str()) {
+    let connected_port = serial
+        .as_ref()
+        .and_then(|port| port.name())
+        .ok_or_else(|| {
+            "Connect an Openterface controller before switching USB routing".to_string()
+        })?;
+    if connected_port != device.port_name {
         return Err(
             "The connected controller changed; reconnect before switching USB routing".to_string(),
         );
     }
 
-    let mut command = vec![
-        0x57,
-        0xab,
-        0x00,
-        0x17,
-        0x05,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        u8::from(to_target),
-    ];
-    let checksum = command
-        .iter()
-        .fold(0u8, |sum, byte| sum.wrapping_add(*byte));
-    command.push(checksum);
-    port.write_all(&command)
-        .map_err(|error| format!("Could not switch the USB route: {error}"))?;
-
     if device.controller == Some("CH9329") {
-        std::thread::sleep(Duration::from_millis(200));
-        port.write_data_terminal_ready(true).map_err(|error| {
-            format!("USB route was set, but the controller could not reset the switch: {error}")
+        let chip = device.capture_chip.ok_or_else(|| {
+            "Windows could not identify the capture chip for USB route switching".to_string()
         })?;
-        std::thread::sleep(Duration::from_millis(500));
-        port.write_data_terminal_ready(false).map_err(|error| {
-            format!(
-                "USB route was set, but the controller could not restore its serial line: {error}"
-            )
-        })?;
+        let hid_instance_ids = windows_devices::capture_hid_instance_ids(&device.port_name)?;
+        drop(serial);
+        windows_capture_firmware::set_usb_route(chip, &hid_instance_ids, to_target)?;
     } else if device.controller != Some("CH32V208") {
         return Err("USB route switching is unavailable for this controller".to_string());
+    } else {
+        let port = serial.as_mut().ok_or_else(|| {
+            "Connect an Openterface controller before switching USB routing".to_string()
+        })?;
+        let mut command = vec![
+            0x57,
+            0xab,
+            0x00,
+            0x17,
+            0x05,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            u8::from(to_target),
+        ];
+        let checksum = command
+            .iter()
+            .fold(0u8, |sum, byte| sum.wrapping_add(*byte));
+        command.push(checksum);
+        port.write_all(&command)
+            .map_err(|error| format!("Could not switch the USB route: {error}"))?;
     }
 
     Ok(if to_target {

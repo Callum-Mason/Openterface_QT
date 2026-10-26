@@ -744,3 +744,66 @@ fn read_register(
     }
     Err(last_error)
 }
+
+pub fn set_usb_route(chip: &str, instance_ids: &[String], to_target: bool) -> Result<(), String> {
+    if chip != "MS2109" {
+        return Err(format!(
+            "The {chip} capture chip does not support CH9329 USB route switching"
+        ));
+    }
+
+    let api = HidApi::new()
+        .map_err(|error| format!("Could not initialize Windows HID access: {error}"))?;
+    let mut matches = api
+        .device_list()
+        .filter(|device| device.vendor_id() == 0x534d && device.product_id() == 0x2109)
+        .filter(|device| {
+            let path = device.path().to_string_lossy();
+            instance_ids
+                .iter()
+                .any(|instance_id| hid_path_matches_instance(&path, instance_id))
+        });
+    let info = matches.next().ok_or_else(|| {
+        "Windows could not match the capture-chip HID path to the selected controller".to_string()
+    })?;
+    if matches.next().is_some() {
+        return Err("More than one capture-chip HID interface matched this controller".to_string());
+    }
+    let device = info
+        .open_device(&api)
+        .map_err(|error| format!("Could not open the capture-chip HID interface: {error}"))?;
+
+    let version = (0xcbdc..=0xcbdf)
+        .filter_map(|address| read_register(&device, address, &[(0, 9)]).ok())
+        .map(|byte| format!("{byte:02}"))
+        .collect::<String>();
+    let route_bit = if version.len() == 8 && version.as_str() >= "24081309" {
+        0x01
+    } else {
+        // Older MS2109 firmware stores the switch state in bit 4.
+        0x10
+    };
+
+    let current = read_register(&device, 0xdf01, &[(0, 9)])?;
+    let mut updated = current & !0x11;
+    if to_target {
+        updated |= route_bit;
+    }
+
+    let mut report = [0u8; 9];
+    report[1] = 0xb6;
+    report[2] = 0xdf;
+    report[3] = 0x01;
+    report[4] = updated;
+    device
+        .send_feature_report(&report)
+        .map_err(|error| format!("Could not write the capture-chip USB route: {error}"))?;
+
+    let actual = read_register(&device, 0xdf01, &[(0, 9)])?;
+    if actual != updated {
+        return Err(format!(
+            "The capture-chip USB route did not verify (wanted 0x{updated:02x}, read 0x{actual:02x})"
+        ));
+    }
+    Ok(())
+}
