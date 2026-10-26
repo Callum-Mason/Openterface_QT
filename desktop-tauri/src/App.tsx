@@ -1085,7 +1085,10 @@ function App() {
 
   useEffect(() => {
     const handlePointerLockChange = () => {
-      if (document.pointerLockElement === videoRef.current) return;
+      if (document.pointerLockElement === videoRef.current) {
+        pointerLockIntent.current = false;
+        return;
+      }
       if (pointerLockIntent.current && mouseMode === "relative") {
         pointerLockIntent.current = false;
         setMouseMode("absolute");
