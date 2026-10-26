@@ -17,6 +17,7 @@ import { FactoryResetDialog, ResetConfirmationDialog } from "./components/Confir
 import { DeviceRail } from "./components/DeviceRail";
 import { EnvironmentDialog } from "./components/EnvironmentDialog";
 import { DiagnosticsDialog, type DiagnosticCheck } from "./components/DiagnosticsDialog";
+import { FirmwareDialog } from "./components/FirmwareDialog";
 import { PreferencesDialog } from "./components/PreferencesDialog";
 import { StatusBar } from "./components/StatusBar";
 import { TitleBar } from "./components/TitleBar";
@@ -199,6 +200,10 @@ function App() {
   const [diagnosticsRunning, setDiagnosticsRunning] = useState(false);
   const [diagnosticsLastChecked, setDiagnosticsLastChecked] = useState("");
   const [diagnosticsCopied, setDiagnosticsCopied] = useState(false);
+  const [firmwareDialogOpen, setFirmwareDialogOpen] = useState(false);
+  const [firmwareVersion, setFirmwareVersion] = useState("");
+  const [firmwareVersionLoading, setFirmwareVersionLoading] = useState(false);
+  const [firmwareVersionError, setFirmwareVersionError] = useState("");
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateCheckError, setUpdateCheckError] = useState("");
@@ -327,6 +332,20 @@ function App() {
     if (failures.length) setError(`Some device checks could not complete: ${failures.map((failure) => String(failure.reason)).join("; ")}`);
     setDiagnosticsLastChecked(new Date().toLocaleString());
     setDiagnosticsRunning(false);
+  };
+
+  const readCaptureFirmwareVersion = async () => {
+    if (!selectedPort) return;
+    setFirmwareVersionLoading(true);
+    setFirmwareVersionError("");
+    try {
+      const version = await invoke<string>("read_capture_firmware_version", { portName: selectedPort });
+      setFirmwareVersion(version);
+    } catch (cause) {
+      setFirmwareVersionError(String(cause));
+    } finally {
+      setFirmwareVersionLoading(false);
+    }
   };
 
   const copyDiagnosticsReport = async () => {
@@ -1595,6 +1614,7 @@ function App() {
     factoryReset: () => setFactoryResetOpen(true),
     environment: () => { setEnvironmentCopied(false); setEnvironmentOpen(true); },
     diagnostics: () => { setDiagnosticsCopied(false); setDiagnosticsOpen(true); },
+    firmware: () => { setFirmwareVersion(""); setFirmwareVersionError(""); setFirmwareDialogOpen(true); },
     checkForUpdates: () => void checkForUpdates(),
     about: () => setAboutOpen(true),
     website: () => void openExternalLink("website"),
@@ -1629,6 +1649,7 @@ function App() {
               updateChecking={updateChecking}
               resettingConnection={resettingConnection}
               factoryResetting={factoryResetting}
+              firmwareAvailable={!!selectedDevice?.captureChip}
             />
           </>}
         />
@@ -1753,6 +1774,7 @@ function App() {
       <AboutDialog open={aboutOpen} version={appVersion} onClose={() => setAboutOpen(false)} onOpenLink={(destination) => void openExternalLink(destination)} />
       <EnvironmentDialog open={environmentOpen} rows={environmentRows} copied={environmentCopied} onClose={() => setEnvironmentOpen(false)} onCopy={() => void copyEnvironmentReport()} />
       <DiagnosticsDialog open={diagnosticsOpen} checks={diagnosticChecks} running={diagnosticsRunning} lastChecked={diagnosticsLastChecked} copied={diagnosticsCopied} onRefresh={() => void runDiagnostics()} onClose={() => setDiagnosticsOpen(false)} onCopy={() => void copyDiagnosticsReport()} />
+      <FirmwareDialog open={firmwareDialogOpen} chip={selectedDevice?.captureChip ?? null} portName={selectedPort} version={firmwareVersion} loading={firmwareVersionLoading} error={firmwareVersionError} onReadVersion={() => void readCaptureFirmwareVersion()} onClose={() => setFirmwareDialogOpen(false)} />
       <UpdateDialog open={updateDialogOpen} currentVersion={appVersion} release={latestRelease} loading={updateChecking} error={updateCheckError} onClose={() => setUpdateDialogOpen(false)} onOpenReleases={() => void openExternalLink("releases")} />
       <ResetConfirmationDialog open={resetConfirmationOpen} busy={resettingConnection} onClose={() => setResetConfirmationOpen(false)} onConfirm={() => void resetSerialConnection()} />
       <FactoryResetDialog open={factoryResetOpen} busy={factoryResetting} onClose={() => setFactoryResetOpen(false)} onConfirm={() => void factoryResetController()} />

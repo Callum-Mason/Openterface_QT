@@ -210,6 +210,14 @@ input[type="text"], input[type="range"], pre, .mono, dd.mono, .kv-list .mono { u
 .update-release-title { margin-top: var(--space-md); color: var(--color-ink); font-size: var(--text-md); font-weight: 600; }
 .update-notes { max-height: 220px; padding-top: var(--space-xs); overflow-y: auto; white-space: pre-line; user-select: text; }
 
+.firmware-summary { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: start; gap: var(--space-md); }
+.firmware-chip-icon { display: grid; width: 40px; height: 40px; place-items: center; border: 1px solid var(--color-rule); color: var(--color-accent-text); background: var(--color-layer); }
+.firmware-summary .kv-list { min-width: 0; }
+.firmware-message, .firmware-error, .firmware-note { margin-top: var(--space-md); font-size: var(--text-xs); line-height: 1.55; }
+.firmware-message { color: var(--color-accent-text); }
+.firmware-error { color: var(--color-error); overflow-wrap: anywhere; }
+.firmware-note { color: var(--color-muted); }
+
 .diagnostics-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-xs); }
 .diagnostic-card { min-width: 0; padding: var(--space-sm); border: 1px solid var(--color-rule); color: var(--color-ink-2); background: var(--color-layer); }
 .diagnostic-card-heading { display: flex; align-items: center; gap: var(--space-xs); }

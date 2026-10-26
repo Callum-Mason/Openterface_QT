@@ -3,6 +3,7 @@ import {
   ClipboardList,
   ClipboardPaste,
   Activity,
+  Cpu,
   Download,
   ExternalLink,
   ImageDown,
@@ -36,6 +37,7 @@ export type AppMenuActions = {
   factoryReset: () => void;
   environment: () => void;
   diagnostics: () => void;
+  firmware: () => void;
   checkForUpdates: () => void;
   about: () => void;
   website: () => void;
@@ -60,13 +62,14 @@ type AppMenuProps = {
   updateChecking: boolean;
   resettingConnection: boolean;
   factoryResetting: boolean;
+  firmwareAvailable: boolean;
 };
 
 type ItemOptions = { shortcut?: string; disabled?: boolean; checked?: boolean };
 
 export function AppMenu({
   open, onOpenChange, wrapRef, triggerRef, actions, connected, hasVideo, pasting, pasteDisabled, recordingStatus, mouseMode,
-  fullscreenActive, updateChecking, resettingConnection, factoryResetting,
+  fullscreenActive, updateChecking, resettingConnection, factoryResetting, firmwareAvailable,
 }: AppMenuProps) {
   const navigate = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (!open || !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
@@ -120,6 +123,7 @@ export function AppMenu({
         {item(translate("Preferences"), <Settings2 size={15} />, actions.preferences, { shortcut: "Ctrl+P" })}
         {item("Environment report", <ClipboardList size={15} />, actions.environment, { shortcut: "Ctrl+E" })}
         {item("Hardware diagnostics", <Activity size={15} />, actions.diagnostics)}
+        {item("Capture firmware", <Cpu size={15} />, actions.firmware, { disabled: !firmwareAvailable })}
         {item(translate(updateChecking ? "Checking for updates…" : "Check for updates"), <Download size={15} />, actions.checkForUpdates, { shortcut: "Ctrl+U", disabled: updateChecking })}
         {item(translate("About Openterface"), <Info size={15} />, actions.about, { shortcut: "F1" })}
         {item("Website", <ExternalLink size={15} />, actions.website)}

@@ -29,23 +29,24 @@ pub fn discover(ports: &[SerialPortInfo]) -> Vec<KvmDevice> {
             let controller = controller_name(info.vid, info.pid)?;
             let serial_node = find_serial_node(&nodes, &port.port_name, info.vid, info.pid);
             let associated = serial_node.and_then(|serial| associate_video(serial, &nodes));
-            let (generation, capture_chip, camera_name, has_hid, has_camera, has_audio) = associated
-                .map(|video| {
-                    let family = descendants(video, &nodes);
-                    let camera = family.iter().find(|node| is_camera(node));
-                    (
-                        Some(generation(serial_node, video)),
-                        capture_chip(&video.id),
-                        camera
-                            .map(|node| node.name.clone())
-                            .filter(|name| !name.is_empty())
-                            .or_else(|| (!video.name.is_empty()).then(|| video.name.clone())),
-                        family.iter().any(|node| is_hid(node)),
-                        family.iter().any(|node| is_camera(node)) || is_camera(video),
-                        family.iter().any(|node| is_audio(node)),
-                    )
-                })
-                .unwrap_or((None, None, None, false, false, false));
+            let (generation, capture_chip, camera_name, has_hid, has_camera, has_audio) =
+                associated
+                    .map(|video| {
+                        let family = descendants(video, &nodes);
+                        let camera = family.iter().find(|node| is_camera(node));
+                        (
+                            Some(generation(serial_node, video)),
+                            capture_chip(&video.id),
+                            camera
+                                .map(|node| node.name.clone())
+                                .filter(|name| !name.is_empty())
+                                .or_else(|| (!video.name.is_empty()).then(|| video.name.clone())),
+                            family.iter().any(|node| is_hid(node)),
+                            family.iter().any(|node| is_camera(node)) || is_camera(video),
+                            family.iter().any(|node| is_audio(node)),
+                        )
+                    })
+                    .unwrap_or((None, None, None, false, false, false));
 
             Some(KvmDevice {
                 port_name: port.port_name.clone(),
@@ -66,6 +67,39 @@ pub fn discover(ports: &[SerialPortInfo]) -> Vec<KvmDevice> {
         .collect::<Vec<_>>();
     devices.sort_by(|left, right| left.port_name.cmp(&right.port_name));
     devices
+}
+
+pub fn capture_hid_instance_ids(port_name: &str) -> Result<Vec<String>, String> {
+    let ports = serialport::available_ports().map_err(|error| error.to_string())?;
+    let port = ports
+        .iter()
+        .find(|port| port.port_name.eq_ignore_ascii_case(port_name))
+        .ok_or_else(|| "The selected controller port is no longer available".to_string())?;
+    let SerialPortType::UsbPort(info) = &port.port_type else {
+        return Err("The selected controller is not a USB device".to_string());
+    };
+    if controller_name(info.vid, info.pid).is_none() {
+        return Err("The selected port is not a supported Openterface controller".to_string());
+    }
+
+    let nodes = enumerate_nodes();
+    let serial =
+        find_serial_node(&nodes, &port.port_name, info.vid, info.pid).ok_or_else(|| {
+            "Windows could not locate the selected controller in the device tree".to_string()
+        })?;
+    let capture = associate_video(serial, &nodes).ok_or_else(|| {
+        "Windows could not associate a capture device with this controller".to_string()
+    })?;
+
+    let ids = descendants(capture, &nodes)
+        .into_iter()
+        .filter(|node| is_hid(node))
+        .map(|node| node.id.clone())
+        .collect::<Vec<_>>();
+    if ids.is_empty() {
+        return Err("No capture-chip HID interface was found for this controller".to_string());
+    }
+    Ok(ids)
 }
 
 fn controller_name(vid: u16, pid: u16) -> Option<&'static str> {

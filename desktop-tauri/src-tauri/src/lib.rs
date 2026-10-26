@@ -74,6 +74,8 @@ const KEYBOARD_LAYOUTS: &[(&str, &str)] = &[
 ];
 
 #[cfg(windows)]
+mod windows_capture_firmware;
+#[cfg(windows)]
 mod windows_devices;
 #[cfg(windows)]
 mod windows_keys;
@@ -478,6 +480,27 @@ fn list_devices() -> Result<Vec<KvmDevice>, String> {
         })
         .filter(|device| device.controller.is_some())
         .collect())
+}
+
+#[tauri::command]
+fn read_capture_firmware_version(port_name: String) -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        let device = list_devices()?
+            .into_iter()
+            .find(|device| device.port_name.eq_ignore_ascii_case(&port_name))
+            .ok_or_else(|| "The selected controller is no longer available".to_string())?;
+        let chip = device.capture_chip.ok_or_else(|| {
+            "Windows could not identify the capture-chip family for this controller".to_string()
+        })?;
+        let hid_instance_ids = windows_devices::capture_hid_instance_ids(&port_name)?;
+        return windows_capture_firmware::read_version(chip, &hid_instance_ids);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = port_name;
+        Err("Capture firmware reads are available in Windows builds only".to_string())
+    }
 }
 
 #[tauri::command]
@@ -1433,6 +1456,7 @@ pub fn run() {
             paste_clipboard_to_target,
             open_external_link,
             list_devices,
+            read_capture_firmware_version,
             connect_device,
             apply_controller_mode,
             apply_baud_rate,
