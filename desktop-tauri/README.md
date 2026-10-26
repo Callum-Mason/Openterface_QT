@@ -5,7 +5,7 @@ This is the Rust and React desktop application for the Windows x64 migration. Ru
 ## Windows development prerequisites
 
 - Windows 10 or 11 x64
-- Rust stable with the `x86_64-pc-windows-msvc` target
+- Rust 1.90 or newer with the `x86_64-pc-windows-msvc` target
 - Microsoft C++ Build Tools with the Desktop development with C++ workload
 - Node.js 20 or newer and npm
 - WebView2 Runtime (included with supported Windows 10/11 installations)
@@ -38,7 +38,7 @@ The installer is written under `src-tauri/target/x86_64-pc-windows-msvc/release/
 - Routes audio from a selected Openterface capture input to the Windows default output with an explicit live-audio toggle and saved output volume. Audio capture permission is requested when live pass-through is enabled or when a recording starts with audio enabled.
 - Sends keyboard and absolute or relative mouse reports over the connected controller, including clipboard text through the selected keyboard layout.
 - Supports CH9329 baud-rate changes, controller operating-mode changes, serial reconnect, USB routing, and an RTS hardware factory reset; CH32V208 remains limited to its supported 115200 baud mode.
-- Saves target screenshots and records WebM from the selected capture source. Recording can pause, resume, and stop, follows the selected capture-quality and bitrate preferences, can optionally include audio from the selected capture input, and finalizes before source changes, disconnect, or app close. WebView2 selects the WebM codec and pixel format.
+- Saves target screenshots and records WebM from the selected capture source. Recording can pause, resume, and stop, follows the selected capture-quality and bitrate preferences, can optionally include audio from the selected capture input, and prompts for a save location in the Windows Videos folder by default. The last recording location is remembered; pending writes finish before the app closes. WebView2 selects the WebM codec and pixel format.
 - Saves device preferences, capture quality, controller mode, mouse behavior, keyboard layout, Windows shortcut capture, and screen-saver behavior.
 - Offers English and 12 additional locale choices in Preferences, starts in English, remembers the selected language, and loads its existing Qt catalog on demand. Text without a matching catalog entry remains in English while coverage is expanded.
 - Provides a copyable environment report with the app/runtime version, controller and target status, selected video source, and capture settings (`Ctrl+E`).

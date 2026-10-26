@@ -121,6 +121,7 @@ struct AppPreferences {
     audio_volume: u8,
     include_audio_in_recordings: bool,
     recording_video_bitrate: u32,
+    recording_output_path: String,
     capture_quality: String,
     capture_system_shortcuts: bool,
     inhibit_screen_saver: bool,
@@ -140,6 +141,7 @@ impl Default for AppPreferences {
             audio_volume: 80,
             include_audio_in_recordings: false,
             recording_video_bitrate: 8_000_000,
+            recording_output_path: String::new(),
             capture_quality: "1080p60".to_string(),
             capture_system_shortcuts: false,
             inhibit_screen_saver: false,
@@ -193,6 +195,7 @@ fn save_preferences(preferences: AppPreferences, app: tauri::AppHandle) -> Resul
         )
         || preferences.preferred_video_device.len() > 512
         || preferences.preferred_audio_device.len() > 512
+        || preferences.recording_output_path.len() > 2048
         || preferences.audio_volume > 100
         || !(500_000..=20_000_000).contains(&preferences.recording_video_bitrate)
         || preferences.controller_mode > 3
@@ -1406,6 +1409,8 @@ fn set_system_key_capture(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .manage(AppState {
             serial: Arc::new(Mutex::new(None)),
             connection_id: Arc::new(AtomicU64::new(0)),

@@ -2,8 +2,11 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import type { PointerEvent, WheelEvent } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
+import { dirname, join, videoDir } from "@tauri-apps/api/path";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
+import { save } from "@tauri-apps/plugin-dialog";
+import { open as openFile } from "@tauri-apps/plugin-fs";
 import { Camera, Settings2, Video, X } from "lucide-react";
 import { isLanguageCode, loadLanguage, setActiveLanguage, type LanguageCode } from "./i18n";
 import type { AppPreferences, CapturePreset, ControllerStatus, ExternalDestination, KeyboardLayoutInfo, KvmDevice, MouseMode, RecordingStatus, ReleaseSummary, UsbRoute } from "./types";
@@ -55,6 +58,11 @@ function readPreference(key: string, fallback = "") {
   } catch {
     return fallback;
   }
+}
+
+function recordingFilename() {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return `openterface-recording-${timestamp}.webm`;
 }
 
 const keyUsages: Record<string, number> = {
@@ -165,6 +173,7 @@ function App() {
     const stored = Number(readPreference("recording-video-bitrate", "8000000"));
     return Number.isInteger(stored) && stored >= 500_000 && stored <= 20_000_000 ? stored : 8_000_000;
   });
+  const [recordingOutputPath, setRecordingOutputPath] = useState(() => readPreference("recording-output-path"));
   const [capturePreset, setCapturePreset] = useState<CapturePreset>(() => {
     const stored = readPreference("capture-quality", "1080p60");
     return stored in capturePresetConstraints ? stored as CapturePreset : "1080p60";
@@ -218,6 +227,7 @@ function App() {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordingChunksRef = useRef<Blob[]>([]);
   const recordingStopPromiseRef = useRef<Promise<void> | null>(null);
+  const recordingSavePromiseRef = useRef<Promise<void> | null>(null);
   const recordingClockRef = useRef({ elapsedMs: 0, segmentStartedAt: 0 });
   const videoRequestId = useRef(0);
   const captureRequestId = useRef(0);
@@ -336,6 +346,7 @@ function App() {
           setAudioVolume(Number.isInteger(saved.audioVolume) && saved.audioVolume >= 0 && saved.audioVolume <= 100 ? saved.audioVolume : 80);
           setIncludeAudioInRecordings(saved.includeAudioInRecordings);
           setRecordingVideoBitrate(Number.isInteger(saved.recordingVideoBitrate) && saved.recordingVideoBitrate >= 500_000 && saved.recordingVideoBitrate <= 20_000_000 ? saved.recordingVideoBitrate : 8_000_000);
+          setRecordingOutputPath(saved.recordingOutputPath || "");
           setCapturePreset(saved.captureQuality in capturePresetConstraints ? saved.captureQuality : "1080p60");
           setCaptureSystemShortcuts(saved.captureSystemShortcuts);
           setInhibitScreenSaver(saved.inhibitScreenSaver);
@@ -389,7 +400,7 @@ function App() {
   const stopRecording = useCallback((): Promise<void> => {
     if (recordingStopPromiseRef.current) return recordingStopPromiseRef.current;
     const recorder = recorderRef.current;
-    if (!recorder || recorder.state === "inactive") return Promise.resolve();
+    if (!recorder || recorder.state === "inactive") return recordingSavePromiseRef.current ?? Promise.resolve();
     if (recordingClockRef.current.segmentStartedAt) {
       recordingClockRef.current.elapsedMs += Date.now() - recordingClockRef.current.segmentStartedAt;
       recordingClockRef.current.segmentStartedAt = 0;
@@ -399,9 +410,17 @@ function App() {
     const stopped = new Promise<void>((resolve) => {
       recorder.addEventListener("stop", () => resolve(), { once: true });
     });
-    recordingStopPromiseRef.current = stopped;
+    const completed = stopped.then(async () => {
+      await recordingSavePromiseRef.current;
+    });
+    recordingStopPromiseRef.current = completed;
+    void completed.then(() => {
+      if (recordingStopPromiseRef.current === completed) recordingStopPromiseRef.current = null;
+    }, () => {
+      if (recordingStopPromiseRef.current === completed) recordingStopPromiseRef.current = null;
+    });
     recorder.stop();
-    return stopped;
+    return completed;
   }, []);
 
   const stopAudio = useCallback(() => {
@@ -495,7 +514,7 @@ function App() {
     const currentWindow = getCurrentWindow();
     void currentWindow.onCloseRequested(async (event) => {
       const recorder = recorderRef.current;
-      if (!recorder || recorder.state === "inactive") return;
+      if ((!recorder || recorder.state === "inactive") && !recordingSavePromiseRef.current) return;
       event.preventDefault();
       try {
         await stopRecording();
@@ -526,7 +545,21 @@ function App() {
       return;
     }
     let audioStream: MediaStream | null = null;
+    let outputPath: string | null = null;
     try {
+      if (isTauri()) {
+        const directory = recordingOutputPath ? await dirname(recordingOutputPath) : await videoDir();
+        const path = await save({
+          defaultPath: await join(directory, recordingFilename()),
+          filters: [{ name: "WebM video", extensions: ["webm"] }],
+        });
+        if (!path) return;
+        if (!path.toLowerCase().endsWith(".webm")) {
+          throw new Error("WebView2 recordings are saved as WebM. Choose a .webm filename.");
+        }
+        outputPath = path;
+        setRecordingOutputPath(path);
+      }
       if (includeAudioInRecordings) {
         if (!audioDeviceId) throw new Error("Choose an audio input in Preferences before recording with audio.");
         if (!navigator.mediaDevices?.getUserMedia) throw new Error("Audio capture is unavailable in this Windows WebView.");
@@ -548,6 +581,7 @@ function App() {
       }
       recordingChunksRef.current = [];
       recordingStopPromiseRef.current = null;
+      recordingSavePromiseRef.current = null;
       recordingClockRef.current = { elapsedMs: 0, segmentStartedAt: Date.now() };
       setRecordingDurationMs(0);
       const videoBitsPerSecond = recordingVideoBitrate;
@@ -573,25 +607,44 @@ function App() {
         const chunks = recordingChunksRef.current;
         recordingChunksRef.current = [];
         recorderRef.current = null;
-        recordingStopPromiseRef.current = null;
-        setRecordingStatus("idle");
         setRecordingDurationMs(0);
         recordingClockRef.current = { elapsedMs: 0, segmentStartedAt: 0 };
         const recording = new Blob(chunks, { type: recorder.mimeType || mimeType });
         if (!recording.size) {
           setError("The recording did not contain any video data.");
+          setRecordingStatus("idle");
           return;
         }
-        const url = URL.createObjectURL(recording);
-        const link = document.createElement("a");
-        const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-        link.href = url;
-        link.download = `openterface-recording-${timestamp}.webm`;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-        setNoticeMessage("Recording saved to your Downloads folder as WebM.");
+        recordingSavePromiseRef.current = (async () => {
+          try {
+            if (outputPath) {
+              const file = await openFile(outputPath, { write: true, create: true, truncate: true });
+              try {
+                for (const chunk of chunks) {
+                  if (chunk.size) await file.write(new Uint8Array(await chunk.arrayBuffer()));
+                }
+              } finally {
+                await file.close();
+              }
+              setNoticeMessage(`Recording saved as ${outputPath.split(/[\\/]/).pop() || "WebM video"}.`);
+            } else {
+              const url = URL.createObjectURL(recording);
+              const link = document.createElement("a");
+              link.href = url;
+              link.download = recordingFilename();
+              document.body.appendChild(link);
+              link.click();
+              link.remove();
+              window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+              setNoticeMessage("Recording saved to your Downloads folder as WebM.");
+            }
+          } catch (cause) {
+            setError(`Could not save the recording: ${String(cause)}`);
+          } finally {
+            setRecordingStatus("idle");
+            recordingSavePromiseRef.current = null;
+          }
+        })();
       };
       recorder.start(1000);
       setRecordingStatus("recording");
@@ -604,7 +657,7 @@ function App() {
       setRecordingStatus("idle");
       setError(`Could not start recording: ${String(cause)}`);
     }
-  }, [audioDeviceId, includeAudioInRecordings, recordingVideoBitrate]);
+  }, [audioDeviceId, includeAudioInRecordings, recordingOutputPath, recordingVideoBitrate]);
 
   const toggleRecordingPause = useCallback(() => {
     const recorder = recorderRef.current;
@@ -1269,6 +1322,7 @@ function App() {
       audioVolume,
       includeAudioInRecordings,
       recordingVideoBitrate,
+      recordingOutputPath,
       captureQuality: capturePreset,
       captureSystemShortcuts,
       inhibitScreenSaver,
@@ -1280,7 +1334,7 @@ function App() {
     void invoke("save_preferences", { preferences }).catch((cause) => {
       setError(`Could not save preferences: ${String(cause)}`);
     });
-  }, [appliedControllerMode, audioDeviceId, audioVolume, capturePreset, captureSystemShortcuts, includeAudioInRecordings, inhibitScreenSaver, keyboardLayout, language, mouseAutoHide, mouseMode, preferencesReady, recordingVideoBitrate, selectedPort, videoDeviceId]);
+  }, [appliedControllerMode, audioDeviceId, audioVolume, capturePreset, captureSystemShortcuts, includeAudioInRecordings, inhibitScreenSaver, keyboardLayout, language, mouseAutoHide, mouseMode, preferencesReady, recordingOutputPath, recordingVideoBitrate, selectedPort, videoDeviceId]);
 
   useEffect(() => {
     try {
@@ -1305,6 +1359,14 @@ function App() {
       // The Tauri preferences file remains authoritative in the desktop app.
     }
   }, [recordingVideoBitrate]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("recording-output-path", recordingOutputPath);
+    } catch {
+      // The Tauri preferences file remains authoritative in the desktop app.
+    }
+  }, [recordingOutputPath]);
 
   useEffect(() => {
     const shouldCapture = connected && controlActive && captureSystemShortcuts;
