@@ -1483,27 +1483,37 @@ fn write_command(state: &State<'_, AppState>, command: Vec<u8>) -> Result<(), St
     let port = serial
         .as_mut()
         .ok_or_else(|| "Connect an Openterface controller before sending input".to_string())?;
-    write_port_command(port.as_mut(), command)
+    write_port_command_inner(port.as_mut(), command, false)
         .map_err(|error| format!("Could not send input to the controller: {error}"))
 }
 
-fn write_port_command(port: &mut dyn SerialPort, mut command: Vec<u8>) -> std::io::Result<()> {
+fn write_port_command(port: &mut dyn SerialPort, command: Vec<u8>) -> std::io::Result<()> {
+    write_port_command_inner(port, command, true)
+}
+
+fn write_port_command_inner(
+    port: &mut dyn SerialPort,
+    mut command: Vec<u8>,
+    wait_for_transmission: bool,
+) -> std::io::Result<()> {
     let checksum = command
         .iter()
         .fold(0u8, |sum, byte| sum.wrapping_add(*byte));
     command.push(checksum);
-    // The short timeout used by the reader is also applied to writes. At 9600
-    // baud it can expire before a full HID report is accepted, so temporarily
-    // allow enough time for USB-serial drivers to drain the packet.
+    // The short timeout used by the reader is also applied to writes, so leave
+    // enough time for the USB-serial driver to accept a complete HID report.
+    // Input reports skip flush below: on Windows flush waits for the UART to
+    // transmit every byte, while Qt's queued flush is nonblocking.
     let read_timeout = port.timeout();
     port.set_timeout(Duration::from_millis(250))
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?;
 
-    let write_result = port.write_all(&command).and_then(|_| {
-        // Wait for this HID report to leave the OS serial queue before
-        // accepting another one, so old pointer positions cannot accumulate.
-        port.flush()
-    });
+    let write_result = port.write_all(&command);
+    let write_result = if wait_for_transmission {
+        write_result.and_then(|_| port.flush())
+    } else {
+        write_result
+    };
     let restore_result = port
         .set_timeout(read_timeout)
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error));

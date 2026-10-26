@@ -268,7 +268,6 @@ function App() {
   const captureRequestId = useRef(0);
   const heldKeys = useRef(new Set<string>());
   const keyboardSendQueue = useRef<Promise<void>>(Promise.resolve());
-  const lastKeyboardActivity = useRef(0);
   const heldButtons = useRef(0);
   const mouseReportJobs = useRef<MouseReportJob[]>([]);
   const mouseReportPumpRunning = useRef(false);
@@ -1520,7 +1519,6 @@ function App() {
 
   const sendKeys = useCallback((forceRelease = false) => {
     if (appliedControllerMode === 3) return Promise.resolve();
-    lastKeyboardActivity.current = performance.now();
     const keysDown = forceRelease ? [] : [...heldKeys.current];
     const modifiers = keysDown.reduce((mask, code) => mask | (modifierBits[code] ?? 0), 0);
     const keys = keysDown.map((code) => keyUsages[code]).filter((key): key is number => key !== undefined).slice(0, 6);
@@ -1758,8 +1756,7 @@ function App() {
   const sendPointer = (event: PointerEvent<HTMLVideoElement>) => {
     if (!connected || appliedControllerMode === 1 || appliedControllerMode === 3 || !videoRef.current) return;
     const now = performance.now();
-    const pointerReportInterval = controllerBaudRate === 9600 ? 33 : 18;
-    if (event.type === "pointermove" && now - lastKeyboardActivity.current < 80) return;
+    const pointerReportInterval = 16;
     if (event.type === "pointermove" && now - lastMouseSend.current < pointerReportInterval) return;
     lastMouseSend.current = now;
     if (mouseMode === "relative") {
