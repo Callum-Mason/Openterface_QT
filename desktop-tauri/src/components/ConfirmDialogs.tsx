@@ -50,3 +50,21 @@ export function FirmwareInstallDialog({ open, busy, chip, version, onClose, onCo
     </Dialog>
   );
 }
+
+type FirmwareRestoreProps = ConfirmProps & {
+  chip: string;
+  fileName: string;
+};
+
+export function FirmwareRestoreDialog({ open, busy, chip, fileName, onClose, onConfirm }: FirmwareRestoreProps) {
+  if (!open) return null;
+  return (
+    <Dialog titleId="firmware-restore-title" title="Restore capture firmware?" describedBy="firmware-restore-copy" closeLabel="Close" onClose={onClose} busy={busy} alert size="sm"
+      footer={<>
+        <button className="button button-secondary" type="button" onClick={onClose} disabled={busy}>Cancel</button>
+        <button className="button button-danger" type="button" onClick={onConfirm} disabled={busy}>{busy ? "Writing firmware…" : "Restore firmware"}</button>
+      </>}>
+      <p id="firmware-restore-copy">This replaces the firmware on the connected <span className="mono">{chip}</span> capture chip with <span className="mono">{fileName}</span>. Only continue with a backup or image made for this exact chip family.</p>
+    </Dialog>
+  );
+}

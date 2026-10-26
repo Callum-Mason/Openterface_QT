@@ -17,6 +17,7 @@
     "core:window:allow-close",
     "core:window:allow-destroy",
     "core:window:allow-start-dragging",
+    "dialog:allow-open",
     "dialog:allow-save",
     "fs:allow-open",
     "fs:allow-write"

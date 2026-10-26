@@ -288,6 +288,85 @@ pub fn write_eeprom_firmware(
     Ok(())
 }
 
+pub fn read_eeprom_firmware(chip: &str, instance_ids: &[String]) -> Result<Vec<u8>, String> {
+    if !matches!(chip, "MS2109" | "MS2109S") {
+        return Err(format!(
+            "Firmware backup for {chip} is not available in this Tauri release"
+        ));
+    }
+    let (vendor_id, product_id) = match chip {
+        "MS2109" => (0x534d, 0x2109),
+        "MS2109S" => (0x345f, 0x2109),
+        _ => unreachable!(),
+    };
+    let api = HidApi::new()
+        .map_err(|error| format!("Could not initialize Windows HID access: {error}"))?;
+    let mut matches = api
+        .device_list()
+        .filter(|device| device.vendor_id() == vendor_id && device.product_id() == product_id)
+        .filter(|device| {
+            let path = device.path().to_string_lossy();
+            instance_ids
+                .iter()
+                .any(|instance_id| hid_path_matches_instance(&path, instance_id))
+        });
+    let info = matches.next().ok_or_else(|| {
+        "Windows could not match the capture-chip HID path to the selected controller".to_string()
+    })?;
+    if matches.next().is_some() {
+        return Err("More than one capture-chip HID interface matched this controller".to_string());
+    }
+    let device = info
+        .open_device(&api)
+        .map_err(|error| format!("Could not open the capture-chip HID interface: {error}"))?;
+
+    let mut header = Vec::with_capacity(4);
+    for address in 0..4 {
+        header.push(read_eeprom_byte(&device, address)?);
+    }
+    let size = u16::from_be_bytes([header[2], header[3]]) as usize + 52;
+    if !(52..=MAX_EEPROM_FIRMWARE_BYTES).contains(&size) {
+        return Err("The capture firmware header declares an unsupported image size".to_string());
+    }
+
+    let mut firmware = Vec::with_capacity(size);
+    for address in 0..size {
+        firmware.push(read_eeprom_byte(&device, address)?);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    Ok(firmware)
+}
+
+fn read_eeprom_byte(device: &HidDevice, address: usize) -> Result<u8, String> {
+    let address = u16::try_from(address)
+        .map_err(|_| "The firmware image exceeds the EEPROM address space".to_string())?;
+    let mut request = [0u8; 9];
+    request[1] = 0xe5;
+    request[2] = (address >> 8) as u8;
+    request[3] = address as u8;
+
+    let mut last_error = "the HID device rejected the read report".to_string();
+    for attempt in 0..3 {
+        match device.send_feature_report(&request) {
+            Ok(_) => {
+                let mut response = [0u8; 9];
+                match device.get_feature_report(&mut response) {
+                    Ok(length) if length > 4 => return Ok(response[4]),
+                    Ok(_) => last_error = "the HID response was shorter than expected".to_string(),
+                    Err(error) => last_error = error.to_string(),
+                }
+            }
+            Err(error) => last_error = error.to_string(),
+        }
+        if attempt < 2 {
+            std::thread::sleep(Duration::from_millis(15));
+        }
+    }
+    Err(format!(
+        "Could not read EEPROM byte at 0x{address:04x}: {last_error}"
+    ))
+}
+
 pub fn read_version(chip: &str, instance_ids: &[String]) -> Result<String, String> {
     let (vendor_id, product_id, report_attempts, addresses) = match chip {
         "MS2109" => (0x534d, 0x2109, &[(0, 9)][..], 0xcbdc),

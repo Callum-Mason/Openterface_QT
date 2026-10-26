@@ -10,20 +10,23 @@ type FirmwareDialogProps = {
   reading: boolean;
   checking: boolean;
   installing: boolean;
+  backingUp: boolean;
   updateCheck: FirmwareUpdateCheck | null;
   installResult: string;
   error: string;
   onReadVersion: () => void;
   onCheckUpdate: () => void;
   onInstall: () => void;
+  onBackup: () => void;
+  onRestore: () => void;
   onClose: () => void;
 };
 
 export function FirmwareDialog({
-  open, chip, portName, version, reading, checking, installing, updateCheck, installResult, error, onReadVersion, onCheckUpdate, onInstall, onClose,
+  open, chip, portName, version, reading, checking, installing, backingUp, updateCheck, installResult, error, onReadVersion, onCheckUpdate, onInstall, onBackup, onRestore, onClose,
 }: FirmwareDialogProps) {
   if (!open) return null;
-  const busy = reading || checking || installing;
+  const busy = reading || checking || installing || backingUp;
   const canInstall = chip === "MS2109" || chip === "MS2109S";
 
   return (
@@ -36,11 +39,13 @@ export function FirmwareDialog({
       busy={busy}
       size="md"
       footer={<>
-        <span className="dialog-footer-note" role="status">{checking ? "Checking the official firmware index and staging the package…" : installing ? "Writing capture firmware…" : "Firmware changes require your confirmation."}</span>
+        <span className="dialog-footer-note" role="status">{checking ? "Checking the official firmware index and staging the package…" : installing ? "Writing capture firmware…" : backingUp ? "Reading firmware from the capture chip…" : "Firmware changes require your confirmation."}</span>
         <button className="button button-secondary" type="button" onClick={onClose} disabled={busy}>Close</button>
         <button className="button button-secondary" type="button" onClick={onReadVersion} disabled={busy || !chip || !portName}>
           {reading ? "Reading…" : "Read version"}
         </button>
+        {canInstall && <button className="button button-secondary" type="button" onClick={onBackup} disabled={busy || !portName}>{backingUp ? "Backing up…" : "Back up .bin"}</button>}
+        {canInstall && <button className="button button-secondary" type="button" onClick={onRestore} disabled={busy || !portName}>Restore .bin</button>}
         {updateCheck?.updateAvailable && canInstall && <button className="button button-danger" type="button" onClick={onInstall} disabled={busy}>Install update</button>}
         <button className="button button-primary" type="button" onClick={onCheckUpdate} disabled={busy || !chip || !portName}>
           <RefreshCw size={14} className={checking ? "spin" : ""} />{checking ? "Checking…" : "Check online"}
@@ -64,7 +69,7 @@ export function FirmwareDialog({
       {chip?.includes("recovery") && <p className="firmware-message" role="status">This device is in recovery mode. Firmware recovery is not available yet.</p>}
       {error && <p className="firmware-error" role="alert">{error}</p>}
       {installResult && <p className="firmware-message" role="status">{installResult}</p>}
-      <p className="firmware-note">MS2109 and MS2109S updates can be installed here. Firmware backup and restore controls are still being migrated.</p>
+      <p className="firmware-note">MS2109 and MS2109S updates, backups, and restores are supported. Other capture-chip flash flows are still being migrated.</p>
     </Dialog>
   );
 }

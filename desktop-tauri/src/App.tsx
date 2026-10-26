@@ -5,7 +5,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { dirname, join, videoDir } from "@tauri-apps/api/path";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
-import { save } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save } from "@tauri-apps/plugin-dialog";
 import { open as openFile } from "@tauri-apps/plugin-fs";
 import { Camera, Settings2, Video, X } from "lucide-react";
 import { isLanguageCode, loadLanguage, setActiveLanguage, type LanguageCode } from "./i18n";
@@ -13,7 +13,7 @@ import type { AppPreferences, CapturePreset, ControllerStatus, ExternalDestinati
 import { AboutDialog } from "./components/AboutDialog";
 import { AppMenu, type AppMenuActions } from "./components/AppMenu";
 import { CommandBar } from "./components/CommandBar";
-import { FactoryResetDialog, FirmwareInstallDialog, ResetConfirmationDialog } from "./components/ConfirmDialogs";
+import { FactoryResetDialog, FirmwareInstallDialog, FirmwareRestoreDialog, ResetConfirmationDialog } from "./components/ConfirmDialogs";
 import { DeviceRail } from "./components/DeviceRail";
 import { EnvironmentDialog } from "./components/EnvironmentDialog";
 import { DiagnosticsDialog, type DiagnosticCheck } from "./components/DiagnosticsDialog";
@@ -205,7 +205,10 @@ function App() {
   const [firmwareVersionLoading, setFirmwareVersionLoading] = useState(false);
   const [firmwareChecking, setFirmwareChecking] = useState(false);
   const [firmwareInstalling, setFirmwareInstalling] = useState(false);
+  const [firmwareBackingUp, setFirmwareBackingUp] = useState(false);
   const [firmwareInstallConfirmOpen, setFirmwareInstallConfirmOpen] = useState(false);
+  const [firmwareRestoreConfirmOpen, setFirmwareRestoreConfirmOpen] = useState(false);
+  const [firmwareRestorePending, setFirmwareRestorePending] = useState<{ fileName: string; bytes: Uint8Array } | null>(null);
   const [firmwareInstallResult, setFirmwareInstallResult] = useState("");
   const [firmwareUpdateCheck, setFirmwareUpdateCheck] = useState<FirmwareUpdateCheck | null>(null);
   const [firmwareVersionError, setFirmwareVersionError] = useState("");
@@ -383,6 +386,100 @@ function App() {
     } catch (cause) {
       setFirmwareVersionError(String(cause));
       setFirmwareInstallConfirmOpen(false);
+    } finally {
+      setFirmwareInstalling(false);
+    }
+  };
+
+  const backupCaptureFirmware = async () => {
+    if (!selectedPort) return;
+    const chipName = selectedDevice?.captureChip ?? "capture";
+    let outputPath: string | null;
+    try {
+      outputPath = await save({
+        defaultPath: `openterface-${chipName.toLowerCase().replace(/[^a-z0-9-]/g, "-")}-firmware-backup.bin`,
+        filters: [{ name: "Firmware binary", extensions: ["bin"] }],
+      });
+    } catch (cause) {
+      setFirmwareVersionError(String(cause));
+      return;
+    }
+    if (!outputPath) return;
+    setFirmwareBackingUp(true);
+    setFirmwareVersionError("");
+    setFirmwareInstallResult("");
+    try {
+      const bytes = await invoke<number[]>("backup_capture_firmware", { portName: selectedPort });
+      const file = await openFile(outputPath, { write: true, create: true, truncate: true });
+      try {
+        await file.write(new Uint8Array(bytes));
+      } finally {
+        await file.close();
+      }
+      setFirmwareInstallResult(`Firmware backup saved to ${outputPath}.`);
+    } catch (cause) {
+      setFirmwareVersionError(String(cause));
+    } finally {
+      setFirmwareBackingUp(false);
+    }
+  };
+
+  const chooseFirmwareRestore = async () => {
+    if (!selectedPort) return;
+    try {
+      const selectedFile = await openDialog({
+        multiple: false,
+        directory: false,
+        filters: [{ name: "Firmware binary", extensions: ["bin"] }],
+      });
+      if (typeof selectedFile !== "string") return;
+      const file = await openFile(selectedFile, { read: true });
+      const chunks: Uint8Array[] = [];
+      let totalBytes = 0;
+      try {
+        const buffer = new Uint8Array(8192);
+        while (true) {
+          const bytesRead = await file.read(buffer);
+          if (!bytesRead) break;
+          totalBytes += bytesRead;
+          if (totalBytes > 65536) throw new Error("The firmware file exceeds the supported EEPROM image size.");
+          chunks.push(buffer.slice(0, bytesRead));
+        }
+      } finally {
+        await file.close();
+      }
+      if (totalBytes < 16) throw new Error("The selected file is too small to be a capture firmware image.");
+      const bytes = new Uint8Array(totalBytes);
+      let offset = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.length;
+      }
+      setFirmwareRestorePending({ fileName: selectedFile.split(/[\\/]/).pop() || "firmware.bin", bytes });
+      setFirmwareVersionError("");
+      setFirmwareRestoreConfirmOpen(true);
+    } catch (cause) {
+      setFirmwareVersionError(String(cause));
+    }
+  };
+
+  const restoreCaptureFirmware = async () => {
+    if (!selectedPort || !firmwareRestorePending) return;
+    setFirmwareInstalling(true);
+    setFirmwareVersionError("");
+    setFirmwareInstallResult("");
+    try {
+      const result = await invoke<string>("restore_capture_firmware", {
+        portName: selectedPort,
+        bytes: Array.from(firmwareRestorePending.bytes),
+      });
+      setFirmwareInstallResult(result);
+      setFirmwareRestorePending(null);
+      setFirmwareRestoreConfirmOpen(false);
+    } catch (cause) {
+      setFirmwareVersionError(String(cause));
+      setFirmwareRestoreConfirmOpen(false);
+      setFirmwareRestorePending(null);
     } finally {
       setFirmwareInstalling(false);
     }
@@ -1814,11 +1911,12 @@ function App() {
       <AboutDialog open={aboutOpen} version={appVersion} onClose={() => setAboutOpen(false)} onOpenLink={(destination) => void openExternalLink(destination)} />
       <EnvironmentDialog open={environmentOpen} rows={environmentRows} copied={environmentCopied} onClose={() => setEnvironmentOpen(false)} onCopy={() => void copyEnvironmentReport()} />
       <DiagnosticsDialog open={diagnosticsOpen} checks={diagnosticChecks} running={diagnosticsRunning} lastChecked={diagnosticsLastChecked} copied={diagnosticsCopied} onRefresh={() => void runDiagnostics()} onClose={() => setDiagnosticsOpen(false)} onCopy={() => void copyDiagnosticsReport()} />
-      <FirmwareDialog open={firmwareDialogOpen && !firmwareInstallConfirmOpen} chip={selectedDevice?.captureChip ?? null} portName={selectedPort} version={firmwareVersion} reading={firmwareVersionLoading} checking={firmwareChecking} installing={firmwareInstalling} updateCheck={firmwareUpdateCheck} installResult={firmwareInstallResult} error={firmwareVersionError} onReadVersion={() => void readCaptureFirmwareVersion()} onCheckUpdate={() => void checkCaptureFirmwareUpdate()} onInstall={() => setFirmwareInstallConfirmOpen(true)} onClose={() => setFirmwareDialogOpen(false)} />
+      <FirmwareDialog open={firmwareDialogOpen && !firmwareInstallConfirmOpen && !firmwareRestoreConfirmOpen} chip={selectedDevice?.captureChip ?? null} portName={selectedPort} version={firmwareVersion} reading={firmwareVersionLoading} checking={firmwareChecking} installing={firmwareInstalling} backingUp={firmwareBackingUp} updateCheck={firmwareUpdateCheck} installResult={firmwareInstallResult} error={firmwareVersionError} onReadVersion={() => void readCaptureFirmwareVersion()} onCheckUpdate={() => void checkCaptureFirmwareUpdate()} onInstall={() => setFirmwareInstallConfirmOpen(true)} onBackup={() => void backupCaptureFirmware()} onRestore={() => void chooseFirmwareRestore()} onClose={() => setFirmwareDialogOpen(false)} />
       <UpdateDialog open={updateDialogOpen} currentVersion={appVersion} release={latestRelease} loading={updateChecking} error={updateCheckError} onClose={() => setUpdateDialogOpen(false)} onOpenReleases={() => void openExternalLink("releases")} />
       <ResetConfirmationDialog open={resetConfirmationOpen} busy={resettingConnection} onClose={() => setResetConfirmationOpen(false)} onConfirm={() => void resetSerialConnection()} />
       <FactoryResetDialog open={factoryResetOpen} busy={factoryResetting} onClose={() => setFactoryResetOpen(false)} onConfirm={() => void factoryResetController()} />
       <FirmwareInstallDialog open={firmwareInstallConfirmOpen} busy={firmwareInstalling} chip={firmwareUpdateCheck?.chip ?? selectedDevice?.captureChip ?? "capture"} version={firmwareUpdateCheck?.latestVersion ?? ""} onClose={() => setFirmwareInstallConfirmOpen(false)} onConfirm={() => void installCaptureFirmware()} />
+      <FirmwareRestoreDialog open={firmwareRestoreConfirmOpen} busy={firmwareInstalling} chip={selectedDevice?.captureChip ?? "capture"} fileName={firmwareRestorePending?.fileName ?? "firmware.bin"} onClose={() => { setFirmwareRestoreConfirmOpen(false); setFirmwareRestorePending(null); }} onConfirm={() => void restoreCaptureFirmware()} />
     </div>
   );
 }

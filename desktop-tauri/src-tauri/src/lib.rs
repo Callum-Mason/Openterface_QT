@@ -612,6 +612,60 @@ async fn install_capture_firmware(
 }
 
 #[tauri::command]
+async fn backup_capture_firmware(port_name: String) -> Result<Vec<u8>, String> {
+    #[cfg(windows)]
+    {
+        let device = list_devices()?
+            .into_iter()
+            .find(|device| device.port_name.eq_ignore_ascii_case(&port_name))
+            .ok_or_else(|| "The selected controller is no longer available".to_string())?;
+        let chip = device.capture_chip.ok_or_else(|| {
+            "Windows could not identify the capture-chip family for this controller".to_string()
+        })?;
+        let hid_instance_ids = windows_devices::capture_hid_instance_ids(&port_name)?;
+        return tauri::async_runtime::spawn_blocking(move || {
+            windows_capture_firmware::read_eeprom_firmware(chip, &hid_instance_ids)
+        })
+        .await
+        .map_err(|error| format!("Firmware backup could not finish: {error}"))?;
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = port_name;
+        Err("Capture firmware backup is available in Windows builds only".to_string())
+    }
+}
+
+#[tauri::command]
+async fn restore_capture_firmware(port_name: String, bytes: Vec<u8>) -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        let device = list_devices()?
+            .into_iter()
+            .find(|device| device.port_name.eq_ignore_ascii_case(&port_name))
+            .ok_or_else(|| "The selected controller is no longer available".to_string())?;
+        let chip = device.capture_chip.ok_or_else(|| {
+            "Windows could not identify the capture-chip family for this controller".to_string()
+        })?;
+        let hid_instance_ids = windows_devices::capture_hid_instance_ids(&port_name)?;
+        tauri::async_runtime::spawn_blocking(move || {
+            windows_capture_firmware::write_eeprom_firmware(chip, &hid_instance_ids, &bytes)
+        })
+        .await
+        .map_err(|error| format!("Firmware restore could not finish: {error}"))??;
+        return Ok(
+            "Firmware was written. Reconnect or power-cycle the capture device, then read its version to confirm."
+                .to_string(),
+        );
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (port_name, bytes);
+        Err("Capture firmware restore is available in Windows builds only".to_string())
+    }
+}
+
+#[tauri::command]
 fn connect_device(
     port_name: String,
     state: State<'_, AppState>,
@@ -1568,6 +1622,8 @@ pub fn run() {
             read_capture_firmware_version,
             check_capture_firmware_update,
             install_capture_firmware,
+            backup_capture_firmware,
+            restore_capture_firmware,
             connect_device,
             apply_controller_mode,
             apply_baud_rate,
