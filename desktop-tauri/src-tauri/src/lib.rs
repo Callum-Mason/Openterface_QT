@@ -730,7 +730,7 @@ fn connect_device(
         &[9_600, 115_200]
     };
     let mut connected_port = None;
-    let mut last_error = None;
+    let mut probe_errors = Vec::new();
     for baud_rate in baud_rates {
         let mut port = match serialport::new(&port_name, *baud_rate)
             .timeout(std::time::Duration::from_millis(100))
@@ -738,9 +738,7 @@ fn connect_device(
         {
             Ok(port) => port,
             Err(error) => {
-                last_error = Some(format!(
-                    "Could not open {port_name} at {baud_rate} baud: {error}"
-                ));
+                probe_errors.push(format!("{baud_rate} baud: could not open port ({error})"));
                 continue;
             }
         };
@@ -749,11 +747,26 @@ fn connect_device(
                 connected_port = Some((port, *baud_rate));
                 break;
             }
-            Err(error) => last_error = Some(format!("{port_name} at {baud_rate} baud: {error}")),
+            Err(error) => probe_errors.push(format!("{baud_rate} baud: {error}")),
         }
     }
     let (mut port, baud_rate) = connected_port
-        .ok_or_else(|| last_error.unwrap_or_else(|| format!("Could not connect to {port_name}")))?;
+        .ok_or_else(|| {
+            let attempts = baud_rates
+                .iter()
+                .map(|rate| rate.to_string())
+                .collect::<Vec<_>>()
+                .join(" and ");
+            let default_note = if device.controller == Some("CH9329") {
+                " (9600 is the CH9329 default)"
+            } else {
+                ""
+            };
+            format!(
+                "Could not identify the controller on {port_name}. Tried {attempts} baud{default_note}. {}",
+                probe_errors.join("; ")
+            )
+        })?;
     port.set_timeout(Duration::from_millis(10))
         .map_err(|error| format!("Could not configure controller response polling: {error}"))?;
 
@@ -1272,6 +1285,11 @@ fn process_controller_packets(buffer: &mut Vec<u8>, app: &tauri::AppHandle) {
 }
 
 fn probe_controller(port: &mut dyn SerialPort, reset_ch32v208: bool) -> Result<(), String> {
+    if !reset_ch32v208 {
+        // Match the Qt connection path: let the CH9329 serial bridge settle
+        // before issuing its first GET_INFO request.
+        std::thread::sleep(Duration::from_millis(50));
+    }
     if reset_ch32v208 {
         std::thread::sleep(Duration::from_millis(100));
         send_controller_command(port, 0x0f, &[])
@@ -1279,12 +1297,17 @@ fn probe_controller(port: &mut dyn SerialPort, reset_ch32v208: bool) -> Result<(
         std::thread::sleep(Duration::from_millis(100));
     }
 
-    let attempts = if reset_ch32v208 { 5 } else { 1 };
+    let attempts = if reset_ch32v208 { 5 } else { 2 };
     for attempt in 0..attempts {
         send_controller_command(port, 0x01, &[]).map_err(|error| {
             format!("Could not send controller identification request: {error}")
         })?;
-        let deadline = Instant::now() + Duration::from_millis(350);
+        let response_timeout = if reset_ch32v208 {
+            Duration::from_millis(350)
+        } else {
+            Duration::from_secs(1)
+        };
+        let deadline = Instant::now() + response_timeout;
         let mut response = Vec::with_capacity(64);
         while Instant::now() < deadline {
             let mut chunk = [0u8; 32];
@@ -1308,7 +1331,12 @@ fn probe_controller(port: &mut dyn SerialPort, reset_ch32v208: bool) -> Result<(
             }
         }
         if attempt + 1 < attempts {
-            std::thread::sleep(Duration::from_millis(300 * (attempt as u64 + 1)));
+            let retry_delay = if reset_ch32v208 {
+                300 * (attempt as u64 + 1)
+            } else {
+                100
+            };
+            std::thread::sleep(Duration::from_millis(retry_delay));
         }
     }
     Err("The controller did not return a valid identification response".to_string())
@@ -1328,20 +1356,11 @@ fn send_controller_command(
 }
 
 fn valid_info_response(response: &[u8]) -> bool {
-    for start in 0..response.len().saturating_sub(5) {
-        if response[start] != 0x57 || response[start + 1] != 0xab || response[start + 3] != 0x81 {
-            continue;
-        }
-        let packet_length = response[start + 4] as usize + 6;
-        let end = start + packet_length;
-        if end <= response.len() {
-            // The Qt connection path accepts a complete GET_INFO response by
-            // header and response command; some supported firmware reports a
-            // checksum mismatch while still returning usable device info.
-            return true;
-        }
-    }
-    false
+    // Match Qt's connection check: the response header and command are enough
+    // to identify the controller, without requiring a complete payload frame.
+    response
+        .windows(4)
+        .any(|header| header[0] == 0x57 && header[1] == 0xab && header[3] == 0x81)
 }
 
 #[tauri::command]
