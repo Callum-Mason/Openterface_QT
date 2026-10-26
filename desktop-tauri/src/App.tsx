@@ -173,6 +173,14 @@ function App() {
     const stored = Number(readPreference("recording-video-bitrate", "8000000"));
     return Number.isInteger(stored) && stored >= 500_000 && stored <= 20_000_000 ? stored : 8_000_000;
   });
+  const [recordingAudioBitrate, setRecordingAudioBitrate] = useState(() => {
+    const stored = Number(readPreference("recording-audio-bitrate", "128000"));
+    return Number.isInteger(stored) && stored >= 32_000 && stored <= 512_000 ? stored : 128_000;
+  });
+  const [recordingAudioSampleRate, setRecordingAudioSampleRate] = useState(() => {
+    const stored = Number(readPreference("recording-audio-sample-rate", "44100"));
+    return [22_050, 44_100, 48_000, 96_000].includes(stored) ? stored : 44_100;
+  });
   const [recordingOutputPath, setRecordingOutputPath] = useState(() => readPreference("recording-output-path"));
   const [capturePreset, setCapturePreset] = useState<CapturePreset>(() => {
     const stored = readPreference("capture-quality", "1080p60");
@@ -346,6 +354,8 @@ function App() {
           setAudioVolume(Number.isInteger(saved.audioVolume) && saved.audioVolume >= 0 && saved.audioVolume <= 100 ? saved.audioVolume : 80);
           setIncludeAudioInRecordings(saved.includeAudioInRecordings);
           setRecordingVideoBitrate(Number.isInteger(saved.recordingVideoBitrate) && saved.recordingVideoBitrate >= 500_000 && saved.recordingVideoBitrate <= 20_000_000 ? saved.recordingVideoBitrate : 8_000_000);
+          setRecordingAudioBitrate(Number.isInteger(saved.recordingAudioBitrate) && saved.recordingAudioBitrate >= 32_000 && saved.recordingAudioBitrate <= 512_000 ? saved.recordingAudioBitrate : 128_000);
+          setRecordingAudioSampleRate([22_050, 44_100, 48_000, 96_000].includes(saved.recordingAudioSampleRate) ? saved.recordingAudioSampleRate : 44_100);
           setRecordingOutputPath(saved.recordingOutputPath || "");
           setCapturePreset(saved.captureQuality in capturePresetConstraints ? saved.captureQuality : "1080p60");
           setCaptureSystemShortcuts(saved.captureSystemShortcuts);
@@ -566,6 +576,7 @@ function App() {
         audioStream = await navigator.mediaDevices.getUserMedia({
           audio: {
             deviceId: { exact: audioDeviceId },
+            sampleRate: { ideal: recordingAudioSampleRate },
             echoCancellation: false,
             noiseSuppression: false,
             autoGainControl: false,
@@ -592,7 +603,7 @@ function App() {
       const recorder = new MediaRecorder(recordingStream, {
         mimeType,
         videoBitsPerSecond,
-        ...(audioStream ? { audioBitsPerSecond: 128_000 } : {}),
+        ...(audioStream ? { audioBitsPerSecond: recordingAudioBitrate } : {}),
       });
       recordingAudioStreamRef.current = audioStream;
       audioStream = null;
@@ -657,7 +668,7 @@ function App() {
       setRecordingStatus("idle");
       setError(`Could not start recording: ${String(cause)}`);
     }
-  }, [audioDeviceId, includeAudioInRecordings, recordingOutputPath, recordingVideoBitrate]);
+  }, [audioDeviceId, includeAudioInRecordings, recordingAudioBitrate, recordingAudioSampleRate, recordingOutputPath, recordingVideoBitrate]);
 
   const toggleRecordingPause = useCallback(() => {
     const recorder = recorderRef.current;
@@ -1322,6 +1333,8 @@ function App() {
       audioVolume,
       includeAudioInRecordings,
       recordingVideoBitrate,
+      recordingAudioBitrate,
+      recordingAudioSampleRate,
       recordingOutputPath,
       captureQuality: capturePreset,
       captureSystemShortcuts,
@@ -1334,7 +1347,7 @@ function App() {
     void invoke("save_preferences", { preferences }).catch((cause) => {
       setError(`Could not save preferences: ${String(cause)}`);
     });
-  }, [appliedControllerMode, audioDeviceId, audioVolume, capturePreset, captureSystemShortcuts, includeAudioInRecordings, inhibitScreenSaver, keyboardLayout, language, mouseAutoHide, mouseMode, preferencesReady, recordingOutputPath, recordingVideoBitrate, selectedPort, videoDeviceId]);
+  }, [appliedControllerMode, audioDeviceId, audioVolume, capturePreset, captureSystemShortcuts, includeAudioInRecordings, inhibitScreenSaver, keyboardLayout, language, mouseAutoHide, mouseMode, preferencesReady, recordingAudioBitrate, recordingAudioSampleRate, recordingOutputPath, recordingVideoBitrate, selectedPort, videoDeviceId]);
 
   useEffect(() => {
     try {
@@ -1367,6 +1380,15 @@ function App() {
       // The Tauri preferences file remains authoritative in the desktop app.
     }
   }, [recordingOutputPath]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("recording-audio-bitrate", String(recordingAudioBitrate));
+      window.localStorage.setItem("recording-audio-sample-rate", String(recordingAudioSampleRate));
+    } catch {
+      // The Tauri preferences file remains authoritative in the desktop app.
+    }
+  }, [recordingAudioBitrate, recordingAudioSampleRate]);
 
   useEffect(() => {
     const shouldCapture = connected && controlActive && captureSystemShortcuts;
@@ -1641,6 +1663,10 @@ function App() {
         onCapturePresetChange={setCapturePreset}
         recordingVideoBitrate={recordingVideoBitrate}
         onRecordingVideoBitrateChange={setRecordingVideoBitrate}
+        recordingAudioBitrate={recordingAudioBitrate}
+        onRecordingAudioBitrateChange={setRecordingAudioBitrate}
+        recordingAudioSampleRate={recordingAudioSampleRate}
+        onRecordingAudioSampleRateChange={setRecordingAudioSampleRate}
         captureSystemShortcuts={captureSystemShortcuts}
         onCaptureSystemShortcutsChange={setCaptureSystemShortcuts}
         inhibitScreenSaver={inhibitScreenSaver}

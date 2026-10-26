@@ -40,6 +40,10 @@ export type PreferencesDialogProps = {
   onCapturePresetChange: (preset: CapturePreset) => void;
   recordingVideoBitrate: number;
   onRecordingVideoBitrateChange: (bitrate: number) => void;
+  recordingAudioBitrate: number;
+  onRecordingAudioBitrateChange: (bitrate: number) => void;
+  recordingAudioSampleRate: number;
+  onRecordingAudioSampleRateChange: (sampleRate: number) => void;
   captureSystemShortcuts: boolean;
   onCaptureSystemShortcutsChange: (enabled: boolean) => void;
   inhibitScreenSaver: boolean;
@@ -59,6 +63,8 @@ export function PreferencesDialog({
   audioDevices, audioDeviceId, onSelectAudioDevice, onRefreshAudioDevices, audioEnabled, audioStarting, onToggleAudio, audioVolume, onAudioVolumeChange,
   includeAudioInRecordings, onIncludeAudioInRecordingsChange,
   recordingVideoBitrate, onRecordingVideoBitrateChange,
+  recordingAudioBitrate, onRecordingAudioBitrateChange,
+  recordingAudioSampleRate, onRecordingAudioSampleRateChange,
   onCaptureSystemShortcutsChange, inhibitScreenSaver, onInhibitScreenSaverChange,
   mouseMode, onMouseModeChange, mouseAutoHide, onMouseAutoHideChange,
   keyboardLayouts, keyboardLayout, onKeyboardLayoutChange,
@@ -137,6 +143,17 @@ export function PreferencesDialog({
         <label className="preference-slider"><span>Output volume <strong>{audioVolume}%</strong></span><input type="range" min="0" max="100" step="1" value={audioVolume} onChange={(event) => onAudioVolumeChange(Number(event.target.value))} disabled={!audioEnabled} /></label>
         <label className="preference-switch preference-switch-secondary"><span><strong>Include capture audio in recordings</strong><small>Record from the selected input, whether or not live pass-through is enabled.</small></span>
           <input type="checkbox" checked={includeAudioInRecordings} onChange={(event) => onIncludeAudioInRecordingsChange(event.target.checked)} disabled={!audioDeviceId} />
+        </label>
+        <label className="preference-slider"><span>Recording audio bitrate <strong>{Math.round(recordingAudioBitrate / 1000)} kbps</strong></span>
+          <input type="range" min="32000" max="512000" step="16000" value={recordingAudioBitrate} onChange={(event) => onRecordingAudioBitrateChange(Number(event.target.value))} disabled={!includeAudioInRecordings} />
+        </label>
+        <label className="preference-field"><span>Recording sample rate</span>
+          <select value={recordingAudioSampleRate} onChange={(event) => onRecordingAudioSampleRateChange(Number(event.target.value))} disabled={!includeAudioInRecordings}>
+            <option value={22050}>22.05 kHz</option>
+            <option value={44100}>44.1 kHz</option>
+            <option value={48000}>48 kHz</option>
+            <option value={96000}>96 kHz</option>
+          </select>
         </label>
         <p className="preference-note">Recording audio is requested only when a recording starts. The Windows microphone permission prompt may appear the first time.</p>
       </section>
