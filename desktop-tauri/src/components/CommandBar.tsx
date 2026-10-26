@@ -3,12 +3,8 @@ import { formatRecordingDuration } from "../lib/format";
 import type { RecordingStatus } from "../types";
 
 type CommandBarProps = {
-  connected: boolean;
   hasVideo: boolean;
   targetName: string;
-  videoDevices: MediaDeviceInfo[];
-  videoDeviceId: string;
-  onSelectVideo: (deviceId: string) => void;
   recordingStatus: RecordingStatus;
   recordingDurationMs: number;
   onStartRecording: () => void;
@@ -23,7 +19,7 @@ type CommandBarProps = {
 };
 
 export function CommandBar({
-  connected, hasVideo, targetName, videoDevices, videoDeviceId, onSelectVideo, recordingStatus, recordingDurationMs, onStartRecording, onStopRecording,
+  hasVideo, targetName, recordingStatus, recordingDurationMs, onStartRecording, onStopRecording,
   onTogglePause, zoom, onZoomIn, onZoomOut, onScreenshot, fullscreenActive, onToggleFullscreen,
 }: CommandBarProps) {
   const stopping = recordingStatus === "stopping";
@@ -34,11 +30,6 @@ export function CommandBar({
         <span className="target-name">{hasVideo ? targetName : "No signal"}</span>
       </div>
       <div className="commandbar-tools">
-        {connected && videoDevices.length > 1 && (
-          <select className="select select-compact" aria-label="Video capture device" value={videoDeviceId} onChange={(event) => onSelectVideo(event.target.value)}>
-            {videoDevices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Video device ${index + 1}`}</option>)}
-          </select>
-        )}
         <span className="tool-divider" aria-hidden="true" />
         {recordingStatus === "idle"
           ? <button className="console-tool recording-start" type="button" aria-label="Start video recording" title="Start video recording (Ctrl+Shift+R)" onClick={onStartRecording} disabled={!hasVideo}><Circle size={14} fill="currentColor" /></button>

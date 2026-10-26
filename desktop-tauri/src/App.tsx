@@ -7,7 +7,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog, save } from "@tauri-apps/plugin-dialog";
 import { open as openFile } from "@tauri-apps/plugin-fs";
-import { Camera, Settings2, Video, X } from "lucide-react";
+import { Settings2, Video, X } from "lucide-react";
 import { isLanguageCode, loadLanguage, setActiveLanguage, type LanguageCode } from "./i18n";
 import type { AppPreferences, CapturePreset, ControllerStatus, ExternalDestination, FirmwareUpdateCheck, KeyboardLayoutInfo, KvmDevice, MouseMode, RecordingStatus, ReleaseSummary, UsbRoute } from "./types";
 import { AboutDialog } from "./components/AboutDialog";
@@ -157,7 +157,7 @@ function App() {
   const [videoZoom, setVideoZoom] = useState(1);
   const [videoStream, setVideoStream] = useState<MediaStream | null>(null);
   const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
-  const [videoDeviceId, setVideoDeviceId] = useState(() => readPreference("preferred-video-device"));
+  const [videoDeviceId, setVideoDeviceId] = useState("");
   const [language, setLanguage] = useState<LanguageCode>(() => {
     const stored = readPreference("language", "en");
     return isLanguageCode(stored) ? stored : "en";
@@ -260,11 +260,13 @@ function App() {
   const videoRequestId = useRef(0);
   const captureRequestId = useRef(0);
   const heldKeys = useRef(new Set<string>());
+  const keyboardSendQueue = useRef<Promise<void>>(Promise.resolve());
   const heldButtons = useRef(0);
   const lastMouseSend = useRef(0);
   const lastMousePosition = useRef({ x: 0, y: 0 });
   const pointerLockIntent = useRef(false);
   const selectedDevice = devices.find((device) => device.portName === selectedPort);
+  const selectedVideoInput = videoDevices.find((device) => device.deviceId === videoDeviceId);
   const environmentRows = [
     { label: "Application", value: `Openterface Mini-KVM ${appVersion}` },
     { label: "Desktop runtime", value: isTauri() ? "Tauri with WebView2" : "Browser preview" },
@@ -273,7 +275,7 @@ function App() {
     { label: "Serial port", value: connected ? selectedPort : "Not connected" },
     { label: "Target status", value: controllerStatus ? controllerStatus.targetConnected ? "Online" : "Offline" : connected ? "Unknown" : "Not connected" },
     { label: "Video source", value: videoStream ? videoStream.getVideoTracks()[0]?.label || targetName : "Not streaming" },
-    { label: "Capture devices found", value: String(videoDevices.length) },
+    { label: "KVM capture input", value: selectedVideoInput?.label || (selectedDevice?.hasCamera ? "Detected" : "Not detected") },
     { label: "Capture preset", value: capturePreset },
     { label: "Target recording", value: recordingStatus === "idle" ? "Stopped" : recordingStatus === "paused" ? "Paused" : recordingStatus === "stopping" ? "Saving" : "Recording" },
     { label: "System shortcut capture", value: captureSystemShortcuts ? "Enabled" : "Disabled" },
@@ -284,7 +286,6 @@ function App() {
     `Runtime details: ${navigator.userAgent}`,
   ].join("\n");
 
-  const selectedVideoInput = videoDevices.find((device) => device.deviceId === videoDeviceId);
   const selectedAudioInput = audioDevices.find((device) => device.deviceId === audioDeviceId);
   const recorderAvailable = typeof MediaRecorder !== "undefined"
     && ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].some((mimeType) => MediaRecorder.isTypeSupported(mimeType));
@@ -307,7 +308,7 @@ function App() {
     {
       label: "Video capture",
       status: videoStream ? "pass" : "attention",
-      detail: videoStream ? `${videoStream.getVideoTracks()[0]?.label || targetName} is streaming.` : selectedVideoInput ? `${selectedVideoInput.label || "Video input"} is selected but not streaming.` : `${videoDevices.length} video input${videoDevices.length === 1 ? "" : "s"} found; no active stream.`,
+      detail: videoStream ? `${videoStream.getVideoTracks()[0]?.label || targetName} is streaming.` : selectedDevice?.hasCamera ? "The Mini-KVM capture interface is detected, but its video stream is not open." : "The Mini-KVM capture interface is not detected.",
     },
     {
       label: "Audio capture",
@@ -577,7 +578,6 @@ function App() {
         if (saved) {
           if (isLanguageCode(saved.language)) setLanguage(saved.language);
           setSelectedPort(saved.preferredControllerPort);
-          setVideoDeviceId(saved.preferredVideoDevice);
           setAudioDeviceId(saved.preferredAudioDevice || "");
           setAudioVolume(Number.isInteger(saved.audioVolume) && saved.audioVolume >= 0 && saved.audioVolume <= 100 ? saved.audioVolume : 80);
           setIncludeAudioInRecordings(saved.includeAudioInRecordings);
@@ -1221,7 +1221,7 @@ function App() {
     return () => track?.removeEventListener("ended", handleEnded);
   }, [stopRecording, videoStream]);
 
-  const openVideo = useCallback(async (requestedDeviceId?: string, cameraHint?: string | null, requireKvmCapture = false) => {
+  const openVideo = useCallback(async (cameraHint?: string | null) => {
     if (recorderRef.current && recorderRef.current.state !== "inactive") await stopRecording();
     const requestId = ++videoRequestId.current;
     const isCurrentRequest = () => videoRequestId.current === requestId;
@@ -1239,9 +1239,7 @@ function App() {
           ? devices.find((device) => device.label.toLowerCase().includes(cameraHint.toLowerCase()))
           : undefined;
         const capture = devices.find((device) => /openterface|usb.*(video|capture)|capture.*usb|hdmi/i.test(device.label));
-        const savedId = readPreference("preferred-video-device");
-        const saved = requireKvmCapture ? undefined : devices.find((device) => device.deviceId === savedId);
-        return hinted ?? capture ?? saved;
+        return hinted ?? capture;
       };
       let preferred = findPreferred(inputs);
       const { width, height, frameRate } = capturePresetConstraints[capturePreset];
@@ -1255,17 +1253,17 @@ function App() {
         },
       });
       let stream: MediaStream;
-      if (requestedDeviceId) {
-        stream = await navigator.mediaDevices.getUserMedia(constraintsFor(requestedDeviceId));
-      } else if (preferred) {
+      if (preferred) {
         try {
           stream = await navigator.mediaDevices.getUserMedia(constraintsFor(preferred.deviceId));
-        } catch (cause) {
+        } catch {
           if (!isCurrentRequest()) return;
-          if (requireKvmCapture) throw cause;
-          stream = await navigator.mediaDevices.getUserMedia(constraintsFor());
+          throw new Error("Could not open the Mini-KVM capture input");
         }
       } else {
+        // WebView2 hides camera labels until a camera permission has been
+        // granted. Open a temporary stream only to reveal labels, then stop
+        // it before selecting the Mini-KVM input below.
         stream = await navigator.mediaDevices.getUserMedia(constraintsFor());
       }
       if (!isCurrentRequest()) {
@@ -1278,37 +1276,36 @@ function App() {
         return;
       }
       setVideoDevices(inputs);
-      if (!requestedDeviceId) {
-        preferred = findPreferred(inputs);
-        if (requireKvmCapture && !preferred) {
+      preferred = findPreferred(inputs);
+      if (!preferred) {
+        stream.getTracks().forEach((track) => track.stop());
+        setVideoStream((current) => {
+          current?.getTracks().forEach((track) => track.stop());
+          activeVideoStream.current = null;
+          return null;
+        });
+        setVideoError("Could not identify the Mini-KVM capture input. Check the device connection and reconnect.");
+        setTargetName("No signal");
+        return;
+      }
+      const currentDeviceId = stream.getVideoTracks()[0]?.getSettings().deviceId;
+      if (preferred.deviceId !== currentDeviceId) {
+        let preferredStream: MediaStream;
+        try {
+          preferredStream = await navigator.mediaDevices.getUserMedia(constraintsFor(preferred.deviceId));
+        } catch {
           stream.getTracks().forEach((track) => track.stop());
-          setVideoStream((current) => {
-            current?.getTracks().forEach((track) => track.stop());
-            activeVideoStream.current = null;
-            return null;
-          });
-          setVideoError("Could not identify the Mini-KVM capture input. Choose the Openterface video input to reconnect.");
-          setTargetName("No signal");
+          throw new Error("Could not open the Mini-KVM capture input");
+        }
+        if (!isCurrentRequest()) {
+          preferredStream.getTracks().forEach((track) => track.stop());
+          stream.getTracks().forEach((track) => track.stop());
           return;
         }
-        const activeId = stream.getVideoTracks()[0]?.getSettings().deviceId;
-        if (preferred && preferred.deviceId !== activeId) {
-          try {
-            const preferredStream = await navigator.mediaDevices.getUserMedia(constraintsFor(preferred.deviceId));
-            if (!isCurrentRequest()) {
-              preferredStream.getTracks().forEach((track) => track.stop());
-              stream.getTracks().forEach((track) => track.stop());
-              return;
-            }
-            stream.getTracks().forEach((track) => track.stop());
-            stream = preferredStream;
-          } catch (cause) {
-            if (requireKvmCapture) throw cause;
-            // Keep the working default stream when the hinted source is unavailable.
-          }
-        }
+        stream.getTracks().forEach((track) => track.stop());
+        stream = preferredStream;
       }
-      const activeId = stream.getVideoTracks()[0]?.getSettings().deviceId ?? requestedDeviceId ?? preferred?.deviceId ?? "";
+      const activeId = stream.getVideoTracks()[0]?.getSettings().deviceId ?? preferred.deviceId;
       if (!isCurrentRequest()) {
         stream.getTracks().forEach((track) => track.stop());
         return;
@@ -1330,7 +1327,7 @@ function App() {
       inputs = await enumerateVideoInputs();
       if (!isCurrentRequest()) return;
       setVideoDevices(inputs);
-      setVideoError(`Could not open a video capture device: ${String(cause)}`);
+      setVideoError(`Could not open the Mini-KVM capture input: ${String(cause)}`);
     }
   }, [capturePreset, stopRecording]);
 
@@ -1346,7 +1343,7 @@ function App() {
       setConnectionLabel(message);
       const connectedBaudRate = message.match(/at (\d+) baud/i)?.[1];
       if (connectedBaudRate) setControllerBaudRate(Number(connectedBaudRate));
-      await openVideo(undefined, selectedDevice?.cameraName, true);
+      await openVideo(selectedDevice?.cameraName);
       await refreshAudioDevices();
     } catch (cause) {
       setError(String(cause));
@@ -1359,6 +1356,8 @@ function App() {
     videoRequestId.current += 1;
     await stopRecording();
     stopAudio();
+    heldKeys.current.clear();
+    await sendKeys();
     await releaseMouseButtons();
     pointerLockIntent.current = false;
     if (document.pointerLockElement) document.exitPointerLock();
@@ -1475,16 +1474,16 @@ function App() {
     }
   };
 
-  const sendKeys = useCallback(async () => {
-    if (appliedControllerMode === 3) return;
+  const sendKeys = useCallback(() => {
+    if (appliedControllerMode === 3) return Promise.resolve();
     const keysDown = [...heldKeys.current];
     const modifiers = keysDown.reduce((mask, code) => mask | (modifierBits[code] ?? 0), 0);
     const keys = keysDown.map((code) => keyUsages[code]).filter((key): key is number => key !== undefined).slice(0, 6);
-    try {
-      await invoke("send_keyboard_report", { modifiers, keys });
-    } catch (cause) {
-      setError(String(cause));
-    }
+    keyboardSendQueue.current = keyboardSendQueue.current
+      .catch(() => undefined)
+      .then(() => invoke<void>("send_keyboard_report", { modifiers, keys }))
+      .catch((cause) => { setError(String(cause)); });
+    return keyboardSendQueue.current;
   }, [appliedControllerMode]);
 
   useEffect(() => {
@@ -1494,15 +1493,6 @@ function App() {
       // Preferences remain active for the current session when storage is unavailable.
     }
   }, [selectedPort]);
-
-  useEffect(() => {
-    if (!videoDeviceId) return;
-    try {
-      window.localStorage.setItem("preferred-video-device", videoDeviceId);
-    } catch {
-      // Preferences remain active for the current session when storage is unavailable.
-    }
-  }, [videoDeviceId]);
 
   useEffect(() => {
     try {
@@ -1569,7 +1559,7 @@ function App() {
     const preferences: AppPreferences = {
       language,
       preferredControllerPort: selectedPort,
-      preferredVideoDevice: videoDeviceId || readPreference("preferred-video-device"),
+      preferredVideoDevice: videoDeviceId,
       preferredAudioDevice: audioDeviceId || readPreference("preferred-audio-device"),
       audioVolume,
       includeAudioInRecordings,
@@ -1688,8 +1678,8 @@ function App() {
       void sendKeys();
     };
     const up = (event: KeyboardEvent) => {
-      if (!controlActive) return;
       if (!keyUsages[event.code] && !modifierBits[event.code]) return;
+      if (!controlActive && !heldKeys.current.has(event.code)) return;
       event.preventDefault();
       heldKeys.current.delete(event.code);
       void sendKeys();
@@ -1701,13 +1691,20 @@ function App() {
       }
       void releaseMouseButtons();
     };
+    const releaseOnHide = () => {
+      if (document.visibilityState !== "visible") release();
+    };
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
     window.addEventListener("blur", release);
+    window.addEventListener("pagehide", release);
+    document.addEventListener("visibilitychange", releaseOnHide);
     return () => {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
       window.removeEventListener("blur", release);
+      window.removeEventListener("pagehide", release);
+      document.removeEventListener("visibilitychange", releaseOnHide);
       release();
     };
   }, [connected, controlActive, releaseMouseButtons, sendKeys]);
@@ -1715,7 +1712,8 @@ function App() {
   const sendPointer = (event: PointerEvent<HTMLVideoElement>) => {
     if (!connected || appliedControllerMode === 1 || appliedControllerMode === 3 || !videoRef.current) return;
     const now = performance.now();
-    if (event.type === "pointermove" && now - lastMouseSend.current < 18) return;
+    const pointerReportInterval = controllerBaudRate === 9600 ? 33 : 18;
+    if (event.type === "pointermove" && now - lastMouseSend.current < pointerReportInterval) return;
     lastMouseSend.current = now;
     if (mouseMode === "relative") {
       const widthRatio = window.screen.width > 0 ? window.innerWidth / window.screen.width : 1;
@@ -1819,7 +1817,6 @@ function App() {
           loadingDevices={loadingDevices}
           controllerStatus={controllerStatus}
           hasVideo={!!videoStream}
-          videoInputCount={videoDevices.length}
           usbRoute={usbRoute}
           switchingUsbRoute={switchingUsbRoute}
           onSwitchRoute={(route) => void switchUsbRoute(route)}
@@ -1837,12 +1834,8 @@ function App() {
           {noticeMessage && <div className="banner" role="status"><span>{noticeMessage}</span><button type="button" aria-label="Dismiss notification" onClick={() => setNoticeMessage("")}><X size={14} /></button></div>}
 
           <CommandBar
-            connected={connected}
             hasVideo={!!videoStream}
             targetName={targetName}
-            videoDevices={videoDevices}
-            videoDeviceId={videoDeviceId}
-            onSelectVideo={(deviceId) => { setVideoDeviceId(deviceId); void openVideo(deviceId); }}
             recordingStatus={recordingStatus}
             recordingDurationMs={recordingDurationMs}
             onStartRecording={startRecording}
@@ -1859,8 +1852,7 @@ function App() {
           <div className={`video-stage ${videoStream ? "has-video" : ""} ${mouseAutoHide && controlActive ? "auto-hide-cursor" : ""}`} tabIndex={connected ? 0 : -1} aria-label={connected ? "Target display, keyboard and mouse control active when focused" : "Target display unavailable until a device is connected"} onPointerEnter={() => setControlActive(true)} onPointerLeave={() => { setControlActive(false); if (heldKeys.current.size) { heldKeys.current.clear(); void sendKeys(); } void releaseMouseButtons(); }} onFocus={() => setControlActive(true)}>
             {videoStream ? <video ref={videoRef} style={{ transform: `scale(${videoZoom})` }} autoPlay playsInline muted onContextMenu={(event) => event.preventDefault()} onPointerMove={sendPointer} onPointerDown={(event) => setPointerButton(event, true)} onPointerUp={(event) => setPointerButton(event, false)} onPointerLeave={(event) => { if (heldButtons.current) { heldButtons.current = 0; sendPointer(event); } }} onWheel={scroll} /> : <div className="empty-display">
               <Video size={20} strokeWidth={1.5} aria-hidden="true" />
-              <div className="empty-copy"><h2>{connected ? "No video signal" : "No target display"}</h2><p>{connected ? "Select a capture source to view the connected computer." : "Connect a Mini-KVM to view its video input."}</p></div>
-              {connected && <button className="button button-secondary" type="button" onClick={() => void openVideo()}><Camera size={14} />Choose video input</button>}
+              <div className="empty-copy"><h2>{connected ? "No video signal" : "No target display"}</h2><p>{connected ? "Waiting for the Mini-KVM capture input." : "Connect a Mini-KVM to view its video input."}</p></div>
             </div>}
           </div>
 
@@ -1890,9 +1882,6 @@ function App() {
         modeApplying={modeApplying}
         onControllerModeChange={setControllerMode}
         onApplyControllerMode={() => void applyControllerMode()}
-        videoDevices={videoDevices}
-        videoDeviceId={videoDeviceId}
-        onSelectVideo={(deviceId) => { setVideoDeviceId(deviceId); if (deviceId) void openVideo(deviceId); }}
         audioDevices={audioDevices}
         audioDeviceId={audioDeviceId}
         onSelectAudioDevice={(deviceId) => { setAudioDeviceId(deviceId); if (audioEnabled) { stopAudio(); if (deviceId) void startAudio(deviceId); } }}

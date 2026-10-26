@@ -22,9 +22,6 @@ export type PreferencesDialogProps = {
   modeApplying: boolean;
   onControllerModeChange: (mode: number) => void;
   onApplyControllerMode: () => void;
-  videoDevices: MediaDeviceInfo[];
-  videoDeviceId: string;
-  onSelectVideo: (deviceId: string) => void;
   audioDevices: MediaDeviceInfo[];
   audioDeviceId: string;
   onSelectAudioDevice: (deviceId: string) => void;
@@ -58,8 +55,8 @@ export type PreferencesDialogProps = {
 };
 
 export function PreferencesDialog({
-  open, onClose, language, onLanguageChange, devices, selectedPort, onSelectPort, controllerSelectionDisabled, videoDevices, videoDeviceId,
-  onSelectVideo, capturePreset, onCapturePresetChange, captureSystemShortcuts,
+  open, onClose, language, onLanguageChange, devices, selectedPort, onSelectPort, controllerSelectionDisabled,
+  capturePreset, onCapturePresetChange, captureSystemShortcuts,
   audioDevices, audioDeviceId, onSelectAudioDevice, onRefreshAudioDevices, audioEnabled, audioStarting, onToggleAudio, audioVolume, onAudioVolumeChange,
   includeAudioInRecordings, onIncludeAudioInRecordingsChange,
   recordingVideoBitrate, onRecordingVideoBitrateChange,
@@ -90,12 +87,6 @@ export function PreferencesDialog({
           <select value={selectedPort} onChange={(event) => onSelectPort(event.target.value)} disabled={devices.length === 0 || controllerSelectionDisabled}>
             {devices.length === 0 && <option value="">No controller detected</option>}
             {devices.map((device) => <option key={device.portName} value={device.portName}>{[device.controller, device.portName].filter(Boolean).join(" · ")}</option>)}
-          </select>
-        </label>
-        <label className="preference-field"><span>Preferred video input</span>
-          <select value={videoDeviceId} onChange={(event) => onSelectVideo(event.target.value)} disabled={videoDevices.length === 0}>
-            {videoDevices.length === 0 && <option value="">Connect a controller to discover inputs</option>}
-            {videoDevices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Video input ${index + 1}`}</option>)}
           </select>
         </label>
         <label className="preference-field"><span>Controller baud rate</span>

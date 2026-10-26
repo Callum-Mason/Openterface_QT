@@ -11,7 +11,6 @@ type DeviceRailProps = {
   loadingDevices: boolean;
   controllerStatus: ControllerStatus | null;
   hasVideo: boolean;
-  videoInputCount: number;
   usbRoute: UsbRoute;
   switchingUsbRoute: boolean;
   onSwitchRoute: (route: "host" | "target") => void;
@@ -25,11 +24,11 @@ type DeviceRailProps = {
 };
 
 export function DeviceRail({
-  devices, selectedPort, onSelectPort, selectedDevice, connected, connecting, loadingDevices, controllerStatus, hasVideo, videoInputCount,
+  devices, selectedPort, onSelectPort, selectedDevice, connected, connecting, loadingDevices, controllerStatus, hasVideo,
   usbRoute, switchingUsbRoute, onSwitchRoute, onConnect, onDisconnect, onScan, connectionLabel, controllerMode, mouseMode, onOpenPreferences,
 }: DeviceRailProps) {
   const targetUsb = connected && controllerStatus ? controllerStatus.targetConnected ? "Connected" : "Disconnected" : connected ? "Checking…" : "—";
-  const videoInput = hasVideo ? "Live capture" : videoInputCount ? `${videoInputCount} available` : selectedDevice?.hasCamera ? "Available" : "Not detected";
+  const videoInput = hasVideo ? "Live capture" : selectedDevice?.hasCamera ? "Available" : "Not detected";
   const inputHint = controllerMode === 3 ? "Custom HID input is not yet available in this Tauri build."
     : controllerMode === 1 ? "Click the target display to send keyboard input."
       : mouseMode === "relative" ? "Click the target display to capture the pointer. Press Escape to release it."
