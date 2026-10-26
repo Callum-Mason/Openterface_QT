@@ -260,6 +260,7 @@ function App() {
   const captureRequestId = useRef(0);
   const heldKeys = useRef(new Set<string>());
   const keyboardSendQueue = useRef<Promise<void>>(Promise.resolve());
+  const lastKeyboardActivity = useRef(0);
   const heldButtons = useRef(0);
   const lastMouseSend = useRef(0);
   const lastMousePosition = useRef({ x: 0, y: 0 });
@@ -1356,7 +1357,7 @@ function App() {
     await stopRecording();
     stopAudio();
     heldKeys.current.clear();
-    await sendKeys();
+    await sendKeys(true);
     await releaseMouseButtons();
     pointerLockIntent.current = false;
     if (document.pointerLockElement) document.exitPointerLock();
@@ -1473,14 +1474,18 @@ function App() {
     }
   };
 
-  const sendKeys = useCallback(() => {
+  const sendKeys = useCallback((forceRelease = false) => {
     if (appliedControllerMode === 3) return Promise.resolve();
-    const keysDown = [...heldKeys.current];
+    lastKeyboardActivity.current = performance.now();
+    const keysDown = forceRelease ? [] : [...heldKeys.current];
     const modifiers = keysDown.reduce((mask, code) => mask | (modifierBits[code] ?? 0), 0);
     const keys = keysDown.map((code) => keyUsages[code]).filter((key): key is number => key !== undefined).slice(0, 6);
     keyboardSendQueue.current = keyboardSendQueue.current
       .catch(() => undefined)
-      .then(() => invoke<void>("send_keyboard_report", { modifiers, keys }))
+      .then(async () => {
+        await invoke<void>("send_keyboard_report", { modifiers, keys });
+        if (forceRelease) await invoke<void>("send_keyboard_report", { modifiers: 0, keys: [] });
+      })
       .catch((cause) => { setError(String(cause)); });
     return keyboardSendQueue.current;
   }, [appliedControllerMode]);
@@ -1684,10 +1689,8 @@ function App() {
       void sendKeys();
     };
     const release = () => {
-      if (heldKeys.current.size) {
-        heldKeys.current.clear();
-        void sendKeys();
-      }
+      heldKeys.current.clear();
+      void sendKeys(true);
       void releaseMouseButtons();
     };
     const releaseOnHide = () => {
@@ -1712,6 +1715,7 @@ function App() {
     if (!connected || appliedControllerMode === 1 || appliedControllerMode === 3 || !videoRef.current) return;
     const now = performance.now();
     const pointerReportInterval = controllerBaudRate === 9600 ? 33 : 18;
+    if (event.type === "pointermove" && now - lastKeyboardActivity.current < 80) return;
     if (event.type === "pointermove" && now - lastMouseSend.current < pointerReportInterval) return;
     lastMouseSend.current = now;
     if (mouseMode === "relative") {
