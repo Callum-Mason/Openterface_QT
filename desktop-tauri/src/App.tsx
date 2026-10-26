@@ -262,6 +262,7 @@ function App() {
   const keyboardSendQueue = useRef<Promise<void>>(Promise.resolve());
   const lastKeyboardActivity = useRef(0);
   const heldButtons = useRef(0);
+  const mouseSendQueue = useRef<Promise<void>>(Promise.resolve());
   const lastMouseSend = useRef(0);
   const lastMousePosition = useRef({ x: 0, y: 0 });
   const pointerLockIntent = useRef(false);
@@ -974,16 +975,24 @@ function App() {
     }, "image/png");
   }, []);
 
+  const queueMouseReport = useCallback((command: "send_mouse_report" | "send_relative_mouse_report", payload: Record<string, number>) => {
+    mouseSendQueue.current = mouseSendQueue.current
+      .catch(() => undefined)
+      .then(() => invoke<void>(command, payload))
+      .catch((cause) => { setError(String(cause)); });
+    return mouseSendQueue.current;
+  }, []);
+
   const releaseMouseButtons = useCallback(async () => {
     if (!heldButtons.current) return;
     heldButtons.current = 0;
     if (mouseMode === "relative") {
-      await invoke("send_relative_mouse_report", { dx: 0, dy: 0, buttons: 0, wheel: 0 }).catch(() => undefined);
+      await queueMouseReport("send_relative_mouse_report", { dx: 0, dy: 0, buttons: 0, wheel: 0 });
     } else {
       const { x, y } = lastMousePosition.current;
-      await invoke("send_mouse_report", { x, y, buttons: 0, wheel: 0 }).catch(() => undefined);
+      await queueMouseReport("send_mouse_report", { x, y, buttons: 0, wheel: 0 });
     }
-  }, [mouseMode]);
+  }, [mouseMode, queueMouseReport]);
 
   const requestPointerCapture = useCallback(() => {
     const video = videoRef.current;
@@ -1723,18 +1732,21 @@ function App() {
       const heightRatio = window.screen.height > 0 ? window.innerHeight / window.screen.height : 1;
       const dx = Math.max(-127, Math.min(127, Math.trunc(event.movementX * widthRatio)));
       const dy = Math.max(-127, Math.min(127, Math.trunc(event.movementY * heightRatio)));
-      void invoke("send_relative_mouse_report", { dx, dy, buttons: heldButtons.current, wheel: 0 }).catch((cause) => setError(String(cause)));
+      void queueMouseReport("send_relative_mouse_report", { dx, dy, buttons: heldButtons.current, wheel: 0 });
       return;
     }
     const { x, y } = targetCoordinates(event, videoRef.current, videoZoom);
     lastMousePosition.current = { x, y };
-    void invoke("send_mouse_report", { x, y, buttons: heldButtons.current, wheel: 0 }).catch((cause) => setError(String(cause)));
+    void queueMouseReport("send_mouse_report", { x, y, buttons: heldButtons.current, wheel: 0 });
   };
 
   const setPointerButton = (event: PointerEvent<HTMLVideoElement>, pressed: boolean) => {
     event.preventDefault();
     if (appliedControllerMode === 1 || appliedControllerMode === 3) return;
     if (mouseMode === "relative" && pressed) requestPointerCapture();
+    if (pressed && mouseMode === "absolute") {
+      try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* The pointer may have been cancelled by the window manager. */ }
+    }
     const bit = event.button === 2 ? 2 : event.button === 1 ? 4 : 1;
     heldButtons.current = pressed ? heldButtons.current | bit : heldButtons.current & ~bit;
     sendPointer(event);
@@ -1745,12 +1757,12 @@ function App() {
     if (!connected || appliedControllerMode === 1 || appliedControllerMode === 3 || !videoRef.current) return;
     const wheel = Math.max(-127, Math.min(127, Math.trunc(-event.deltaY / 50)));
     if (mouseMode === "relative") {
-      void invoke("send_relative_mouse_report", { dx: 0, dy: 0, buttons: heldButtons.current, wheel }).catch((cause) => setError(String(cause)));
+      void queueMouseReport("send_relative_mouse_report", { dx: 0, dy: 0, buttons: heldButtons.current, wheel });
       return;
     }
     const { x, y } = targetCoordinates(event, videoRef.current, videoZoom);
     // DOM deltaY is positive down; CH9329 expects positive values for up.
-    void invoke("send_mouse_report", { x, y, buttons: heldButtons.current, wheel }).catch((cause) => setError(String(cause)));
+    void queueMouseReport("send_mouse_report", { x, y, buttons: heldButtons.current, wheel });
   };
 
   const menuActions: AppMenuActions = {
@@ -1853,7 +1865,7 @@ function App() {
           />
 
           <div className={`video-stage ${videoStream ? "has-video" : ""} ${mouseAutoHide && controlActive ? "auto-hide-cursor" : ""}`} tabIndex={connected ? 0 : -1} aria-label={connected ? "Target display, keyboard and mouse control active when focused" : "Target display unavailable until a device is connected"} onPointerEnter={() => setControlActive(true)} onPointerLeave={() => { setControlActive(false); if (heldKeys.current.size) { heldKeys.current.clear(); void sendKeys(); } void releaseMouseButtons(); }} onFocus={() => setControlActive(true)}>
-            {videoStream ? <video ref={videoRef} style={{ transform: `scale(${videoZoom})` }} autoPlay playsInline muted onContextMenu={(event) => event.preventDefault()} onPointerMove={sendPointer} onPointerDown={(event) => setPointerButton(event, true)} onPointerUp={(event) => setPointerButton(event, false)} onPointerLeave={(event) => { if (heldButtons.current) { heldButtons.current = 0; sendPointer(event); } }} onWheel={scroll} /> : <div className="empty-display">
+            {videoStream ? <video ref={videoRef} style={{ transform: `scale(${videoZoom})` }} autoPlay playsInline muted onContextMenu={(event) => event.preventDefault()} onPointerMove={sendPointer} onPointerDown={(event) => setPointerButton(event, true)} onPointerUp={(event) => setPointerButton(event, false)} onPointerCancel={() => void releaseMouseButtons()} onPointerLeave={(event) => { if (heldButtons.current) { heldButtons.current = 0; sendPointer(event); } }} onWheel={scroll} /> : <div className="empty-display">
               <Video size={20} strokeWidth={1.5} aria-hidden="true" />
               <div className="empty-copy"><h2>{connected ? "No video signal" : "No target display"}</h2><p>{connected ? "Waiting for the Mini-KVM capture input." : "Connect a Mini-KVM to view its video input."}</p></div>
             </div>}
