@@ -18,6 +18,7 @@ import { DeviceRail } from "./components/DeviceRail";
 import { EnvironmentDialog } from "./components/EnvironmentDialog";
 import { DiagnosticsDialog, type DiagnosticCheck } from "./components/DiagnosticsDialog";
 import { FirmwareDialog } from "./components/FirmwareDialog";
+import { WchFirmwareDialog } from "./components/WchFirmwareDialog";
 import { PreferencesDialog } from "./components/PreferencesDialog";
 import { StatusBar } from "./components/StatusBar";
 import { TitleBar } from "./components/TitleBar";
@@ -201,6 +202,7 @@ function App() {
   const [diagnosticsLastChecked, setDiagnosticsLastChecked] = useState("");
   const [diagnosticsCopied, setDiagnosticsCopied] = useState(false);
   const [firmwareDialogOpen, setFirmwareDialogOpen] = useState(false);
+  const [wchFirmwareOpen, setWchFirmwareOpen] = useState(false);
   const [firmwareVersion, setFirmwareVersion] = useState("");
   const [firmwareVersionLoading, setFirmwareVersionLoading] = useState(false);
   const [firmwareChecking, setFirmwareChecking] = useState(false);
@@ -1752,6 +1754,7 @@ function App() {
     environment: () => { setEnvironmentCopied(false); setEnvironmentOpen(true); },
     diagnostics: () => { setDiagnosticsCopied(false); setDiagnosticsOpen(true); },
     firmware: () => { setFirmwareVersion(""); setFirmwareVersionError(""); setFirmwareUpdateCheck(null); setFirmwareInstallResult(""); setFirmwareDialogOpen(true); },
+    wchFirmware: () => setWchFirmwareOpen(true),
     checkForUpdates: () => void checkForUpdates(),
     about: () => setAboutOpen(true),
     website: () => void openExternalLink("website"),
@@ -1912,6 +1915,7 @@ function App() {
       <EnvironmentDialog open={environmentOpen} rows={environmentRows} copied={environmentCopied} onClose={() => setEnvironmentOpen(false)} onCopy={() => void copyEnvironmentReport()} />
       <DiagnosticsDialog open={diagnosticsOpen} checks={diagnosticChecks} running={diagnosticsRunning} lastChecked={diagnosticsLastChecked} copied={diagnosticsCopied} onRefresh={() => void runDiagnostics()} onClose={() => setDiagnosticsOpen(false)} onCopy={() => void copyDiagnosticsReport()} />
       <FirmwareDialog open={firmwareDialogOpen && !firmwareInstallConfirmOpen && !firmwareRestoreConfirmOpen} chip={selectedDevice?.captureChip ?? null} portName={selectedPort} version={firmwareVersion} reading={firmwareVersionLoading} checking={firmwareChecking} installing={firmwareInstalling} backingUp={firmwareBackingUp} updateCheck={firmwareUpdateCheck} installResult={firmwareInstallResult} error={firmwareVersionError} onReadVersion={() => void readCaptureFirmwareVersion()} onCheckUpdate={() => void checkCaptureFirmwareUpdate()} onInstall={() => setFirmwareInstallConfirmOpen(true)} onBackup={() => void backupCaptureFirmware()} onRestore={() => void chooseFirmwareRestore()} onClose={() => setFirmwareDialogOpen(false)} />
+      <WchFirmwareDialog open={wchFirmwareOpen} onClose={() => setWchFirmwareOpen(false)} />
       <UpdateDialog open={updateDialogOpen} currentVersion={appVersion} release={latestRelease} loading={updateChecking} error={updateCheckError} onClose={() => setUpdateDialogOpen(false)} onOpenReleases={() => void openExternalLink("releases")} />
       <ResetConfirmationDialog open={resetConfirmationOpen} busy={resettingConnection} onClose={() => setResetConfirmationOpen(false)} onConfirm={() => void resetSerialConnection()} />
       <FactoryResetDialog open={factoryResetOpen} busy={factoryResetting} onClose={() => setFactoryResetOpen(false)} onConfirm={() => void factoryResetController()} />

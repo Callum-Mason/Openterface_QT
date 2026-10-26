@@ -213,6 +213,9 @@ input[type="text"], input[type="range"], pre, .mono, dd.mono, .kv-list .mono { u
 .firmware-summary { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: start; gap: var(--space-md); }
 .firmware-chip-icon { display: grid; width: 40px; height: 40px; place-items: center; border: 1px solid var(--color-rule); color: var(--color-accent-text); background: var(--color-layer); }
 .firmware-summary .kv-list { min-width: 0; }
+.firmware-actions { display: flex; flex-wrap: wrap; align-items: end; gap: var(--space-sm); margin-top: var(--space-md); }
+.firmware-actions .field-label { min-width: 180px; flex: 1 1 180px; margin-bottom: 0; }
+.firmware-actions .button { min-height: 32px; }
 .firmware-message, .firmware-error, .firmware-note { margin-top: var(--space-md); font-size: var(--text-xs); line-height: 1.55; }
 .firmware-update-result { display: flex; flex-direction: column; gap: var(--space-2xs); margin-top: var(--space-md); padding: var(--space-sm); border-left: 2px solid var(--color-ok); background: var(--color-layer); }
 .firmware-update-result[data-update-available="false"] { border-left-color: var(--color-rule-strong); }

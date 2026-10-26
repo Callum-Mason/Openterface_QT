@@ -81,6 +81,8 @@ mod windows_devices;
 mod windows_keys;
 #[cfg(windows)]
 mod windows_power;
+#[cfg(windows)]
+mod windows_wch_firmware;
 
 struct AppState {
     serial: Arc<Mutex<Option<Box<dyn SerialPort>>>>,
@@ -97,6 +99,16 @@ struct FirmwareUpdateCheck {
     file_name: String,
     package_size_bytes: usize,
     update_available: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WchDeviceSummary {
+    index: u32,
+    chip_name: String,
+    chip_id: u8,
+    device_type: u8,
+    flash_size_bytes: u32,
 }
 
 #[derive(Clone)]
@@ -662,6 +674,42 @@ async fn restore_capture_firmware(port_name: String, bytes: Vec<u8>) -> Result<S
     {
         let _ = (port_name, bytes);
         Err("Capture firmware restore is available in Windows builds only".to_string())
+    }
+}
+
+#[tauri::command]
+async fn scan_wch_firmware_devices() -> Result<Vec<WchDeviceSummary>, String> {
+    #[cfg(windows)]
+    {
+        return tauri::async_runtime::spawn_blocking(windows_wch_firmware::scan_devices)
+            .await
+            .map_err(|error| format!("WCH device scan could not finish: {error}"))?;
+    }
+    #[cfg(not(windows))]
+    {
+        Err("WCH firmware flashing is available in Windows builds only".to_string())
+    }
+}
+
+#[tauri::command]
+async fn flash_wch_firmware(
+    index: u32,
+    chip_id: u8,
+    device_type: u8,
+    firmware: Vec<u8>,
+) -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        return tauri::async_runtime::spawn_blocking(move || {
+            windows_wch_firmware::flash_device(index, chip_id, device_type, &firmware)
+        })
+        .await
+        .map_err(|error| format!("WCH firmware operation could not finish: {error}"))?;
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (index, chip_id, device_type, firmware);
+        Err("WCH firmware flashing is available in Windows builds only".to_string())
     }
 }
 
@@ -1624,6 +1672,8 @@ pub fn run() {
             install_capture_firmware,
             backup_capture_firmware,
             restore_capture_firmware,
+            scan_wch_firmware_devices,
+            flash_wch_firmware,
             connect_device,
             apply_controller_mode,
             apply_baud_rate,

@@ -38,6 +38,7 @@ export type AppMenuActions = {
   environment: () => void;
   diagnostics: () => void;
   firmware: () => void;
+  wchFirmware: () => void;
   checkForUpdates: () => void;
   about: () => void;
   website: () => void;
@@ -124,6 +125,7 @@ export function AppMenu({
         {item("Environment report", <ClipboardList size={15} />, actions.environment, { shortcut: "Ctrl+E" })}
         {item("Hardware diagnostics", <Activity size={15} />, actions.diagnostics)}
         {item("Capture firmware", <Cpu size={15} />, actions.firmware, { disabled: !firmwareAvailable })}
+        {item("Controller firmware", <Cpu size={15} />, actions.wchFirmware)}
         {item(translate(updateChecking ? "Checking for updates…" : "Check for updates"), <Download size={15} />, actions.checkForUpdates, { shortcut: "Ctrl+U", disabled: updateChecking })}
         {item(translate("About Openterface"), <Info size={15} />, actions.about, { shortcut: "F1" })}
         {item("Website", <ExternalLink size={15} />, actions.website)}

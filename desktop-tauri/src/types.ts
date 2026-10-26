@@ -27,6 +27,14 @@ export type KvmDevice = {
   hasAudio: boolean;
 };
 
+export type WchDeviceSummary = {
+  index: number;
+  chipName: string;
+  chipId: number;
+  deviceType: number;
+  flashSizeBytes: number;
+};
+
 export type ControllerStatus = {
   targetConnected: boolean;
   numLock: boolean;
