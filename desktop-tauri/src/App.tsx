@@ -13,7 +13,7 @@ import type { AppPreferences, CapturePreset, ControllerStatus, ExternalDestinati
 import { AboutDialog } from "./components/AboutDialog";
 import { AppMenu, type AppMenuActions } from "./components/AppMenu";
 import { CommandBar } from "./components/CommandBar";
-import { FactoryResetDialog, ResetConfirmationDialog } from "./components/ConfirmDialogs";
+import { FactoryResetDialog, FirmwareInstallDialog, ResetConfirmationDialog } from "./components/ConfirmDialogs";
 import { DeviceRail } from "./components/DeviceRail";
 import { EnvironmentDialog } from "./components/EnvironmentDialog";
 import { DiagnosticsDialog, type DiagnosticCheck } from "./components/DiagnosticsDialog";
@@ -204,6 +204,9 @@ function App() {
   const [firmwareVersion, setFirmwareVersion] = useState("");
   const [firmwareVersionLoading, setFirmwareVersionLoading] = useState(false);
   const [firmwareChecking, setFirmwareChecking] = useState(false);
+  const [firmwareInstalling, setFirmwareInstalling] = useState(false);
+  const [firmwareInstallConfirmOpen, setFirmwareInstallConfirmOpen] = useState(false);
+  const [firmwareInstallResult, setFirmwareInstallResult] = useState("");
   const [firmwareUpdateCheck, setFirmwareUpdateCheck] = useState<FirmwareUpdateCheck | null>(null);
   const [firmwareVersionError, setFirmwareVersionError] = useState("");
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
@@ -354,6 +357,7 @@ function App() {
     if (!selectedPort) return;
     setFirmwareChecking(true);
     setFirmwareVersionError("");
+    setFirmwareInstallResult("");
     setFirmwareUpdateCheck(null);
     try {
       const result = await invoke<FirmwareUpdateCheck>("check_capture_firmware_update", { portName: selectedPort });
@@ -363,6 +367,24 @@ function App() {
       setFirmwareVersionError(String(cause));
     } finally {
       setFirmwareChecking(false);
+    }
+  };
+
+  const installCaptureFirmware = async () => {
+    if (!selectedPort) return;
+    setFirmwareInstalling(true);
+    setFirmwareVersionError("");
+    setFirmwareInstallResult("");
+    try {
+      const result = await invoke<string>("install_capture_firmware", { portName: selectedPort });
+      setFirmwareInstallResult(result);
+      setFirmwareUpdateCheck(null);
+      setFirmwareInstallConfirmOpen(false);
+    } catch (cause) {
+      setFirmwareVersionError(String(cause));
+      setFirmwareInstallConfirmOpen(false);
+    } finally {
+      setFirmwareInstalling(false);
     }
   };
 
@@ -1632,7 +1654,7 @@ function App() {
     factoryReset: () => setFactoryResetOpen(true),
     environment: () => { setEnvironmentCopied(false); setEnvironmentOpen(true); },
     diagnostics: () => { setDiagnosticsCopied(false); setDiagnosticsOpen(true); },
-    firmware: () => { setFirmwareVersion(""); setFirmwareVersionError(""); setFirmwareUpdateCheck(null); setFirmwareDialogOpen(true); },
+    firmware: () => { setFirmwareVersion(""); setFirmwareVersionError(""); setFirmwareUpdateCheck(null); setFirmwareInstallResult(""); setFirmwareDialogOpen(true); },
     checkForUpdates: () => void checkForUpdates(),
     about: () => setAboutOpen(true),
     website: () => void openExternalLink("website"),
@@ -1792,10 +1814,11 @@ function App() {
       <AboutDialog open={aboutOpen} version={appVersion} onClose={() => setAboutOpen(false)} onOpenLink={(destination) => void openExternalLink(destination)} />
       <EnvironmentDialog open={environmentOpen} rows={environmentRows} copied={environmentCopied} onClose={() => setEnvironmentOpen(false)} onCopy={() => void copyEnvironmentReport()} />
       <DiagnosticsDialog open={diagnosticsOpen} checks={diagnosticChecks} running={diagnosticsRunning} lastChecked={diagnosticsLastChecked} copied={diagnosticsCopied} onRefresh={() => void runDiagnostics()} onClose={() => setDiagnosticsOpen(false)} onCopy={() => void copyDiagnosticsReport()} />
-      <FirmwareDialog open={firmwareDialogOpen} chip={selectedDevice?.captureChip ?? null} portName={selectedPort} version={firmwareVersion} reading={firmwareVersionLoading} checking={firmwareChecking} updateCheck={firmwareUpdateCheck} error={firmwareVersionError} onReadVersion={() => void readCaptureFirmwareVersion()} onCheckUpdate={() => void checkCaptureFirmwareUpdate()} onClose={() => setFirmwareDialogOpen(false)} />
+      <FirmwareDialog open={firmwareDialogOpen && !firmwareInstallConfirmOpen} chip={selectedDevice?.captureChip ?? null} portName={selectedPort} version={firmwareVersion} reading={firmwareVersionLoading} checking={firmwareChecking} installing={firmwareInstalling} updateCheck={firmwareUpdateCheck} installResult={firmwareInstallResult} error={firmwareVersionError} onReadVersion={() => void readCaptureFirmwareVersion()} onCheckUpdate={() => void checkCaptureFirmwareUpdate()} onInstall={() => setFirmwareInstallConfirmOpen(true)} onClose={() => setFirmwareDialogOpen(false)} />
       <UpdateDialog open={updateDialogOpen} currentVersion={appVersion} release={latestRelease} loading={updateChecking} error={updateCheckError} onClose={() => setUpdateDialogOpen(false)} onOpenReleases={() => void openExternalLink("releases")} />
       <ResetConfirmationDialog open={resetConfirmationOpen} busy={resettingConnection} onClose={() => setResetConfirmationOpen(false)} onConfirm={() => void resetSerialConnection()} />
       <FactoryResetDialog open={factoryResetOpen} busy={factoryResetting} onClose={() => setFactoryResetOpen(false)} onConfirm={() => void factoryResetController()} />
+      <FirmwareInstallDialog open={firmwareInstallConfirmOpen} busy={firmwareInstalling} chip={firmwareUpdateCheck?.chip ?? selectedDevice?.captureChip ?? "capture"} version={firmwareUpdateCheck?.latestVersion ?? ""} onClose={() => setFirmwareInstallConfirmOpen(false)} onConfirm={() => void installCaptureFirmware()} />
     </div>
   );
 }

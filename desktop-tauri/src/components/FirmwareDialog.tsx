@@ -9,18 +9,22 @@ type FirmwareDialogProps = {
   version: string;
   reading: boolean;
   checking: boolean;
+  installing: boolean;
   updateCheck: FirmwareUpdateCheck | null;
+  installResult: string;
   error: string;
   onReadVersion: () => void;
   onCheckUpdate: () => void;
+  onInstall: () => void;
   onClose: () => void;
 };
 
 export function FirmwareDialog({
-  open, chip, portName, version, reading, checking, updateCheck, error, onReadVersion, onCheckUpdate, onClose,
+  open, chip, portName, version, reading, checking, installing, updateCheck, installResult, error, onReadVersion, onCheckUpdate, onInstall, onClose,
 }: FirmwareDialogProps) {
   if (!open) return null;
-  const busy = reading || checking;
+  const busy = reading || checking || installing;
+  const canInstall = chip === "MS2109" || chip === "MS2109S";
 
   return (
     <Dialog
@@ -32,11 +36,12 @@ export function FirmwareDialog({
       busy={busy}
       size="md"
       footer={<>
-        <span className="dialog-footer-note" role="status">{checking ? "Checking the official firmware index and staging the package…" : "The firmware package stays in memory until you choose to install it."}</span>
+        <span className="dialog-footer-note" role="status">{checking ? "Checking the official firmware index and staging the package…" : installing ? "Writing capture firmware…" : "Firmware changes require your confirmation."}</span>
         <button className="button button-secondary" type="button" onClick={onClose} disabled={busy}>Close</button>
         <button className="button button-secondary" type="button" onClick={onReadVersion} disabled={busy || !chip || !portName}>
           {reading ? "Reading…" : "Read version"}
         </button>
+        {updateCheck?.updateAvailable && canInstall && <button className="button button-danger" type="button" onClick={onInstall} disabled={busy}>Install update</button>}
         <button className="button button-primary" type="button" onClick={onCheckUpdate} disabled={busy || !chip || !portName}>
           <RefreshCw size={14} className={checking ? "spin" : ""} />{checking ? "Checking…" : "Check online"}
         </button>
@@ -55,9 +60,11 @@ export function FirmwareDialog({
         <strong>{updateCheck.updateAvailable ? "Update available" : "Firmware is up to date"}</strong>
         <span>{updateCheck.fileName} · {(updateCheck.packageSizeBytes / 1024).toFixed(1)} KB</span>
       </section>}
+      {updateCheck?.updateAvailable && !canInstall && <p className="firmware-message" role="status">The update is available, but writing firmware for this capture-chip mode is not supported yet.</p>}
       {chip?.includes("recovery") && <p className="firmware-message" role="status">This device is in recovery mode. Firmware recovery is not available yet.</p>}
       {error && <p className="firmware-error" role="alert">{error}</p>}
-      <p className="firmware-note">The selected package is held in memory. Flashing, backup, and restore controls are still being migrated.</p>
+      {installResult && <p className="firmware-message" role="status">{installResult}</p>}
+      <p className="firmware-note">MS2109 and MS2109S updates can be installed here. Firmware backup and restore controls are still being migrated.</p>
     </Dialog>
   );
 }

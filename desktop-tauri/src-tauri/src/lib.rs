@@ -99,12 +99,11 @@ struct FirmwareUpdateCheck {
     update_available: bool,
 }
 
-#[allow(dead_code)]
+#[derive(Clone)]
 struct StagedCaptureFirmware {
     port_name: String,
     chip: String,
     version: String,
-    file_name: String,
     bytes: Vec<u8>,
 }
 
@@ -546,7 +545,6 @@ async fn check_capture_firmware_update(
             port_name,
             chip: chip.to_string(),
             version: check.latest_version.clone(),
-            file_name: check.file_name.clone(),
             bytes,
         });
         let firmware_state = Arc::clone(&state.capture_firmware);
@@ -554,6 +552,57 @@ async fn check_capture_firmware_update(
             .lock()
             .map_err(|_| "Firmware update state is unavailable".to_string())? = staged;
         return Ok(check);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (port_name, state);
+        Err("Capture firmware updates are available in Windows builds only".to_string())
+    }
+}
+
+#[tauri::command]
+async fn install_capture_firmware(
+    port_name: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        let staged = state
+            .capture_firmware
+            .lock()
+            .map_err(|_| "Firmware update state is unavailable".to_string())?
+            .clone()
+            .ok_or_else(|| "Check for a firmware update before installing it".to_string())?;
+        if !staged.port_name.eq_ignore_ascii_case(&port_name) {
+            return Err("The staged package belongs to a different controller".to_string());
+        }
+
+        let device = list_devices()?
+            .into_iter()
+            .find(|device| device.port_name.eq_ignore_ascii_case(&port_name))
+            .ok_or_else(|| "The selected controller is no longer available".to_string())?;
+        if device.capture_chip.as_deref() != Some(staged.chip.as_str()) {
+            return Err(
+                "The connected capture chip does not match the staged firmware".to_string(),
+            );
+        }
+        let hid_instance_ids = windows_devices::capture_hid_instance_ids(&port_name)?;
+        let chip = staged.chip.clone();
+        let bytes = staged.bytes;
+        tauri::async_runtime::spawn_blocking(move || {
+            windows_capture_firmware::write_eeprom_firmware(&chip, &hid_instance_ids, &bytes)
+        })
+        .await
+        .map_err(|error| format!("Firmware operation could not finish: {error}"))??;
+
+        *state
+            .capture_firmware
+            .lock()
+            .map_err(|_| "Firmware update state is unavailable".to_string())? = None;
+        return Ok(format!(
+            "Firmware {} was written. Reconnect or power-cycle the capture device, then read its version to confirm.",
+            staged.version
+        ));
     }
     #[cfg(not(windows))]
     {
@@ -1518,6 +1567,7 @@ pub fn run() {
             list_devices,
             read_capture_firmware_version,
             check_capture_firmware_update,
+            install_capture_firmware,
             connect_device,
             apply_controller_mode,
             apply_baud_rate,

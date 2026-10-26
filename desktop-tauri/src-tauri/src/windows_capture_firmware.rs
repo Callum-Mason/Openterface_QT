@@ -9,6 +9,7 @@ const FIRMWARE_INDEX_URL: &str =
 const FIRMWARE_DIRECTORY_URL: &str = "https://assets.openterface.com/openterface/firmware/";
 const MAX_INDEX_BYTES: usize = 1024 * 1024;
 const MAX_FIRMWARE_BYTES: usize = 16 * 1024 * 1024;
+const MAX_EEPROM_FIRMWARE_BYTES: usize = u16::MAX as usize + 1;
 
 pub async fn check_for_update(
     chip: &str,
@@ -203,6 +204,88 @@ fn version_key(version: &str) -> Option<u64> {
         .filter(char::is_ascii_digit)
         .collect::<String>();
     (!digits.is_empty()).then(|| digits.parse().ok()).flatten()
+}
+
+pub fn write_eeprom_firmware(
+    chip: &str,
+    instance_ids: &[String],
+    bytes: &[u8],
+) -> Result<(), String> {
+    if !matches!(chip, "MS2109" | "MS2109S") {
+        return Err(format!(
+            "Firmware writing for {chip} is not available in this Tauri release"
+        ));
+    }
+    if bytes.len() < 16 || bytes.len() > MAX_EEPROM_FIRMWARE_BYTES {
+        return Err("The firmware image size is outside the supported EEPROM range".to_string());
+    }
+    let declared_size = u16::from_be_bytes([bytes[2], bytes[3]]) as usize + 52;
+    if declared_size > bytes.len() {
+        return Err(
+            "The firmware image header declares data beyond the end of the package".to_string(),
+        );
+    }
+
+    let (vendor_id, product_id) = match chip {
+        "MS2109" => (0x534d, 0x2109),
+        "MS2109S" => (0x345f, 0x2109),
+        _ => unreachable!(),
+    };
+    let api = HidApi::new()
+        .map_err(|error| format!("Could not initialize Windows HID access: {error}"))?;
+    let mut matches = api
+        .device_list()
+        .filter(|device| device.vendor_id() == vendor_id && device.product_id() == product_id)
+        .filter(|device| {
+            let path = device.path().to_string_lossy();
+            instance_ids
+                .iter()
+                .any(|instance_id| hid_path_matches_instance(&path, instance_id))
+        });
+    let info = matches.next().ok_or_else(|| {
+        "Windows could not match the capture-chip HID path to the selected controller".to_string()
+    })?;
+    if matches.next().is_some() {
+        return Err("More than one capture-chip HID interface matched this controller".to_string());
+    }
+    let device = info
+        .open_device(&api)
+        .map_err(|error| format!("Could not open the capture-chip HID interface: {error}"))?;
+
+    for (index, byte) in bytes.iter().copied().enumerate() {
+        let address = u16::try_from(index)
+            .map_err(|_| "The firmware image exceeds the EEPROM address space".to_string())?;
+        let mut report = [0u8; 9];
+        report[1] = 0xe6;
+        report[2] = (address >> 8) as u8;
+        report[3] = address as u8;
+        report[4] = byte;
+        let mut sent = false;
+        let mut last_error = String::new();
+        for attempt in 0..3 {
+            match device.send_feature_report(&report) {
+                Ok(()) => {
+                    sent = true;
+                    break;
+                }
+                Err(error) => {
+                    last_error = error.to_string();
+                    if attempt < 2 {
+                        std::thread::sleep(Duration::from_millis(15));
+                    }
+                }
+            }
+        }
+        if !sent {
+            return Err(format!(
+                "Firmware writing stopped at byte {index}: {last_error}"
+            ));
+        }
+        if (index + 1) % 16 == 0 {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+    Ok(())
 }
 
 pub fn read_version(chip: &str, instance_ids: &[String]) -> Result<String, String> {
