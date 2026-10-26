@@ -210,6 +210,17 @@ input[type="text"], input[type="range"], pre, .mono, dd.mono, .kv-list .mono { u
 .update-release-title { margin-top: var(--space-md); color: var(--color-ink); font-size: var(--text-md); font-weight: 600; }
 .update-notes { max-height: 220px; padding-top: var(--space-xs); overflow-y: auto; white-space: pre-line; user-select: text; }
 
+.diagnostics-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-xs); }
+.diagnostic-card { min-width: 0; padding: var(--space-sm); border: 1px solid var(--color-rule); color: var(--color-ink-2); background: var(--color-layer); }
+.diagnostic-card-heading { display: flex; align-items: center; gap: var(--space-xs); }
+.diagnostic-card-heading h3 { min-width: 0; flex: 1; color: var(--color-ink-2); font-size: var(--text-sm); font-weight: 600; }
+.diagnostic-card-heading > span { color: var(--color-muted); font-size: var(--text-xs); }
+.diagnostic-card[data-status="pass"] .diagnostic-card-heading > svg { color: var(--color-ok); }
+.diagnostic-card[data-status="attention"] .diagnostic-card-heading > svg { color: var(--color-accent-text); }
+.diagnostic-card[data-status="unknown"] .diagnostic-card-heading > svg { color: var(--color-muted); }
+.diagnostic-card p { margin-top: var(--space-xs); color: var(--color-muted); font-size: var(--text-xs); line-height: 1.5; overflow-wrap: anywhere; }
+.diagnostics-note { margin-top: var(--space-md); color: var(--color-muted); font-size: var(--text-xs); line-height: 1.55; }
+
 .preference-section { padding: var(--space-lg) 0; border-bottom: 1px solid var(--color-rule); }
 .preference-section:last-child { border-bottom: 0; padding-bottom: 0; }
 .preference-section-heading { display: flex; align-items: flex-start; gap: var(--space-sm); margin-bottom: var(--space-sm); color: var(--color-ink-2); }
@@ -237,6 +248,7 @@ input[type="text"], input[type="range"], pre, .mono, dd.mono, .kv-list .mono { u
   :root { --rail-width: 232px; }
 }
 @media (max-width: 760px) {
+  .diagnostics-grid { grid-template-columns: minmax(0, 1fr); }
   .workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
   .rail { max-height: 40dvh; border-right: 0; border-bottom: 1px solid var(--color-rule); }
   .titlebar-state { display: none; }

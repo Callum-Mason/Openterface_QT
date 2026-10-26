@@ -16,6 +16,7 @@ import { CommandBar } from "./components/CommandBar";
 import { FactoryResetDialog, ResetConfirmationDialog } from "./components/ConfirmDialogs";
 import { DeviceRail } from "./components/DeviceRail";
 import { EnvironmentDialog } from "./components/EnvironmentDialog";
+import { DiagnosticsDialog, type DiagnosticCheck } from "./components/DiagnosticsDialog";
 import { PreferencesDialog } from "./components/PreferencesDialog";
 import { StatusBar } from "./components/StatusBar";
 import { TitleBar } from "./components/TitleBar";
@@ -194,6 +195,10 @@ function App() {
   const [aboutOpen, setAboutOpen] = useState(false);
   const [environmentOpen, setEnvironmentOpen] = useState(false);
   const [environmentCopied, setEnvironmentCopied] = useState(false);
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [diagnosticsRunning, setDiagnosticsRunning] = useState(false);
+  const [diagnosticsLastChecked, setDiagnosticsLastChecked] = useState("");
+  const [diagnosticsCopied, setDiagnosticsCopied] = useState(false);
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateCheckError, setUpdateCheckError] = useState("");
@@ -264,12 +269,77 @@ function App() {
     `Runtime details: ${navigator.userAgent}`,
   ].join("\n");
 
+  const selectedVideoInput = videoDevices.find((device) => device.deviceId === videoDeviceId);
+  const selectedAudioInput = audioDevices.find((device) => device.deviceId === audioDeviceId);
+  const recorderAvailable = typeof MediaRecorder !== "undefined"
+    && ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].some((mimeType) => MediaRecorder.isTypeSupported(mimeType));
+  const diagnosticChecks: DiagnosticCheck[] = [
+    {
+      label: "Controller discovery",
+      status: devices.length ? "pass" : "attention",
+      detail: devices.length ? `${devices.length} Mini-KVM controller${devices.length === 1 ? "" : "s"} found${selectedDevice ? ` · selected ${selectedDevice.portName}` : ""}.` : "No supported Mini-KVM controller is currently detected.",
+    },
+    {
+      label: "Serial controller link",
+      status: connected ? "pass" : "attention",
+      detail: connected ? `${selectedDevice?.controller ?? "Controller"} connected on ${selectedPort}.` : "Connect a detected controller to check its serial link.",
+    },
+    {
+      label: "Target connection",
+      status: controllerStatus ? controllerStatus.targetConnected ? "pass" : "attention" : "unknown",
+      detail: controllerStatus ? controllerStatus.targetConnected ? "The controller reports an attached target." : "The controller is connected, but reports no attached target." : "Target status is available after connecting to a controller.",
+    },
+    {
+      label: "Video capture",
+      status: videoStream ? "pass" : "attention",
+      detail: videoStream ? `${videoStream.getVideoTracks()[0]?.label || targetName} is streaming.` : selectedVideoInput ? `${selectedVideoInput.label || "Video input"} is selected but not streaming.` : `${videoDevices.length} video input${videoDevices.length === 1 ? "" : "s"} found; no active stream.`,
+    },
+    {
+      label: "Audio capture",
+      status: selectedAudioInput ? "pass" : "attention",
+      detail: selectedAudioInput ? `${selectedAudioInput.label || "Audio input"} selected · live pass-through ${audioEnabled ? "on" : "off"}.` : `${audioDevices.length} audio input${audioDevices.length === 1 ? "" : "s"} found; choose an input in Preferences.`,
+    },
+    {
+      label: "WebM recording",
+      status: recorderAvailable ? "pass" : "attention",
+      detail: recorderAvailable ? `WebView2 recording is available${includeAudioInRecordings ? " with optional audio" : " for video"}.` : "This WebView does not report a supported WebM encoder.",
+    },
+  ];
+
   const copyEnvironmentReport = async () => {
     try {
       await navigator.clipboard.writeText(environmentReport);
       setEnvironmentCopied(true);
     } catch (cause) {
       setError(`Could not copy the environment report: ${String(cause)}`);
+    }
+  };
+
+  const runDiagnostics = async () => {
+    setDiagnosticsRunning(true);
+    setDiagnosticsCopied(false);
+    const results = await Promise.allSettled([
+      refreshDevices(),
+      enumerateVideoInputs().then(setVideoDevices),
+      refreshAudioDevices(),
+    ]);
+    const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failures.length) setError(`Some device checks could not complete: ${failures.map((failure) => String(failure.reason)).join("; ")}`);
+    setDiagnosticsLastChecked(new Date().toLocaleString());
+    setDiagnosticsRunning(false);
+  };
+
+  const copyDiagnosticsReport = async () => {
+    const report = [
+      `Openterface hardware diagnostics · ${new Date().toLocaleString()}`,
+      ...diagnosticChecks.map((check) => `${check.status.toUpperCase()} · ${check.label}: ${check.detail}`),
+      `Runtime: ${navigator.userAgent}`,
+    ].join("\n");
+    try {
+      await navigator.clipboard.writeText(report);
+      setDiagnosticsCopied(true);
+    } catch (cause) {
+      setError(`Could not copy the diagnostic report: ${String(cause)}`);
     }
   };
 
@@ -1524,6 +1594,7 @@ function App() {
     resetConnection: () => setResetConfirmationOpen(true),
     factoryReset: () => setFactoryResetOpen(true),
     environment: () => { setEnvironmentCopied(false); setEnvironmentOpen(true); },
+    diagnostics: () => { setDiagnosticsCopied(false); setDiagnosticsOpen(true); },
     checkForUpdates: () => void checkForUpdates(),
     about: () => setAboutOpen(true),
     website: () => void openExternalLink("website"),
@@ -1681,6 +1752,7 @@ function App() {
       />
       <AboutDialog open={aboutOpen} version={appVersion} onClose={() => setAboutOpen(false)} onOpenLink={(destination) => void openExternalLink(destination)} />
       <EnvironmentDialog open={environmentOpen} rows={environmentRows} copied={environmentCopied} onClose={() => setEnvironmentOpen(false)} onCopy={() => void copyEnvironmentReport()} />
+      <DiagnosticsDialog open={diagnosticsOpen} checks={diagnosticChecks} running={diagnosticsRunning} lastChecked={diagnosticsLastChecked} copied={diagnosticsCopied} onRefresh={() => void runDiagnostics()} onClose={() => setDiagnosticsOpen(false)} onCopy={() => void copyDiagnosticsReport()} />
       <UpdateDialog open={updateDialogOpen} currentVersion={appVersion} release={latestRelease} loading={updateChecking} error={updateCheckError} onClose={() => setUpdateDialogOpen(false)} onOpenReleases={() => void openExternalLink("releases")} />
       <ResetConfirmationDialog open={resetConfirmationOpen} busy={resettingConnection} onClose={() => setResetConfirmationOpen(false)} onConfirm={() => void resetSerialConnection()} />
       <FactoryResetDialog open={factoryResetOpen} busy={factoryResetting} onClose={() => setFactoryResetOpen(false)} onConfirm={() => void factoryResetController()} />

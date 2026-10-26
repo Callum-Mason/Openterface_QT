@@ -2,6 +2,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, ReactNode, RefObject } from "
 import {
   ClipboardList,
   ClipboardPaste,
+  Activity,
   Download,
   ExternalLink,
   ImageDown,
@@ -34,6 +35,7 @@ export type AppMenuActions = {
   resetConnection: () => void;
   factoryReset: () => void;
   environment: () => void;
+  diagnostics: () => void;
   checkForUpdates: () => void;
   about: () => void;
   website: () => void;
@@ -117,6 +119,7 @@ export function AppMenu({
         <div className="app-menu-heading">{translate("Application")}</div>
         {item(translate("Preferences"), <Settings2 size={15} />, actions.preferences, { shortcut: "Ctrl+P" })}
         {item("Environment report", <ClipboardList size={15} />, actions.environment, { shortcut: "Ctrl+E" })}
+        {item("Hardware diagnostics", <Activity size={15} />, actions.diagnostics)}
         {item(translate(updateChecking ? "Checking for updates…" : "Check for updates"), <Download size={15} />, actions.checkForUpdates, { shortcut: "Ctrl+U", disabled: updateChecking })}
         {item(translate("About Openterface"), <Info size={15} />, actions.about, { shortcut: "F1" })}
         {item("Website", <ExternalLink size={15} />, actions.website)}
