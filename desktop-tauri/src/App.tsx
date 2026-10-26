@@ -1098,6 +1098,7 @@ function App() {
         pointerLockIntent.current = false;
         return;
       }
+      void releaseMouseButtons();
       if (pointerLockIntent.current && mouseMode === "relative") {
         pointerLockIntent.current = false;
         setMouseMode("absolute");
@@ -1105,7 +1106,7 @@ function App() {
     };
     document.addEventListener("pointerlockchange", handlePointerLockChange);
     return () => document.removeEventListener("pointerlockchange", handlePointerLockChange);
-  }, [mouseMode]);
+  }, [mouseMode, releaseMouseButtons]);
 
   const pasteToTarget = useCallback(async () => {
     if (!connected || appliedControllerMode === 3 || pasting) return;
@@ -1767,6 +1768,22 @@ function App() {
     if (!connected || appliedControllerMode === 1 || appliedControllerMode === 3 || !videoRef.current) return;
     const now = performance.now();
     const pointerReportInterval = 16;
+    // Mouse button chords can change on pointermove: pointerdown/up only fire
+    // when the first button is pressed or the last button is released.
+    const buttons = event.buttons & 7;
+    const buttonsChanged = event.type === "pointermove" && heldButtons.current !== buttons;
+    if (buttonsChanged) {
+      heldButtons.current = buttons;
+      if (mouseMode === "relative") {
+        void queueMouseReport("send_relative_mouse_report", { dx: 0, dy: 0, buttons, wheel: 0 });
+      } else {
+        const { x, y } = targetCoordinates(event, videoRef.current, videoZoom);
+        lastMousePosition.current = { x, y };
+        void queueMouseReport("send_mouse_report", { x, y, buttons, wheel: 0 });
+        lastMouseSend.current = now;
+        return;
+      }
+    }
     if (mouseMode === "relative") {
       const dx = event.type === "pointermove" ? event.movementX : 0;
       const dy = event.type === "pointermove" ? event.movementY : 0;
@@ -1784,13 +1801,20 @@ function App() {
   const setPointerButton = (event: PointerEvent<HTMLVideoElement>, pressed: boolean) => {
     event.preventDefault();
     if (appliedControllerMode === 1 || appliedControllerMode === 3) return;
-    if (mouseMode === "relative" && pressed) requestPointerCapture();
-    if (pressed && mouseMode === "absolute") {
+    const buttons = event.buttons & 7;
+    if (buttons === heldButtons.current) return;
+    if (mouseMode === "relative" && pressed && buttons) requestPointerCapture();
+    if (pressed && buttons && mouseMode === "absolute") {
       try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* The pointer may have been cancelled by the window manager. */ }
     }
-    const bit = event.button === 2 ? 2 : event.button === 1 ? 4 : 1;
-    heldButtons.current = pressed ? heldButtons.current | bit : heldButtons.current & ~bit;
+    heldButtons.current = buttons;
     sendPointer(event);
+    if (!buttons && mouseMode === "absolute") {
+      const bounds = event.currentTarget.parentElement?.getBoundingClientRect();
+      if (bounds && (event.clientX < bounds.left || event.clientX >= bounds.right || event.clientY < bounds.top || event.clientY >= bounds.bottom)) {
+        setControlActive(false);
+      }
+    }
   };
 
   const scroll = (event: WheelEvent<HTMLVideoElement>) => {
@@ -1905,7 +1929,7 @@ function App() {
             onToggleFullscreen={() => void toggleFullscreen()}
           />
 
-          <div className={`video-stage ${videoStream ? "has-video" : ""} ${mouseAutoHide && controlActive ? "auto-hide-cursor" : ""}`} tabIndex={connected ? 0 : -1} aria-label={connected ? "Target display, keyboard and mouse control active when focused" : "Target display unavailable until a device is connected"} onPointerEnter={() => setControlActive(true)} onPointerLeave={() => { setControlActive(false); if (heldKeys.current.size) { heldKeys.current.clear(); void sendKeys(); } }} onFocus={() => setControlActive(true)}>
+          <div className={`video-stage ${videoStream ? "has-video" : ""} ${mouseAutoHide && controlActive ? "auto-hide-cursor" : ""}`} tabIndex={connected ? 0 : -1} aria-label={connected ? "Target display, keyboard and mouse control active when focused" : "Target display unavailable until a device is connected"} onPointerEnter={() => setControlActive(true)} onPointerLeave={() => { if (heldButtons.current || document.pointerLockElement === videoRef.current) return; setControlActive(false); if (heldKeys.current.size) { heldKeys.current.clear(); void sendKeys(); } }} onFocus={() => setControlActive(true)}>
             {videoStream ? <video ref={videoRef} style={{ transform: `scale(${videoZoom})` }} autoPlay playsInline muted onContextMenu={(event) => event.preventDefault()} onPointerMove={sendPointer} onPointerDown={(event) => setPointerButton(event, true)} onPointerUp={(event) => setPointerButton(event, false)} onPointerCancel={() => void releaseMouseButtons()} onWheel={scroll} /> : <div className="empty-display">
               <Video size={20} strokeWidth={1.5} aria-hidden="true" />
               <div className="empty-copy"><h2>{connected ? "No video signal" : "No target display"}</h2><p>{connected ? "Waiting for the Mini-KVM capture input." : "Connect a Mini-KVM to view its video input."}</p></div>
