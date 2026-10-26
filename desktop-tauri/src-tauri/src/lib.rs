@@ -1211,19 +1211,18 @@ fn spawn_controller_reader(
                     let Some(port) = current.as_mut() else {
                         break;
                     };
-                    match port.read(&mut chunk) {
-                        Ok(count) => received = count,
-                        Err(error)
-                            if matches!(
-                                error.kind(),
-                                std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
-                            ) => {}
-                        Err(_) => {}
+                    // Do not hold the shared port lock in a timed read when
+                    // no reply is waiting: keyboard and mouse writes need it.
+                    let available = port.bytes_to_read().unwrap_or(chunk.len() as u32) as usize;
+                    if available > 0 {
+                        let count = available.min(chunk.len());
+                        if let Ok(count) = port.read(&mut chunk[..count]) {
+                            received = count;
+                        }
                     }
                     if Instant::now() >= next_info_poll {
                         let request = [0x57, 0xab, 0x00, 0x01, 0x00, 0x03];
                         let _ = port.write_all(&request);
-                        let _ = port.flush();
                         next_info_poll = Instant::now() + Duration::from_secs(3);
                     }
                 } else {
@@ -1238,6 +1237,8 @@ fn spawn_controller_reader(
                     }
                     process_controller_packets(&mut buffer, &app);
                 }
+                // Yield outside the lock so input writers can run promptly.
+                std::thread::sleep(Duration::from_millis(2));
             }
         })
         .map(|_| ())
