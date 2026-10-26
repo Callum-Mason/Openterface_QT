@@ -12,6 +12,7 @@ export type KvmDevice = {
   productId: number | null;
   controller: string | null;
   generation: string | null;
+  captureChip: string | null;
   cameraName: string | null;
   hasHid: boolean;
   hasCamera: boolean;

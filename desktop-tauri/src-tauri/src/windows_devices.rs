@@ -29,12 +29,13 @@ pub fn discover(ports: &[SerialPortInfo]) -> Vec<KvmDevice> {
             let controller = controller_name(info.vid, info.pid)?;
             let serial_node = find_serial_node(&nodes, &port.port_name, info.vid, info.pid);
             let associated = serial_node.and_then(|serial| associate_video(serial, &nodes));
-            let (generation, camera_name, has_hid, has_camera, has_audio) = associated
+            let (generation, capture_chip, camera_name, has_hid, has_camera, has_audio) = associated
                 .map(|video| {
                     let family = descendants(video, &nodes);
                     let camera = family.iter().find(|node| is_camera(node));
                     (
                         Some(generation(serial_node, video)),
+                        capture_chip(&video.id),
                         camera
                             .map(|node| node.name.clone())
                             .filter(|name| !name.is_empty())
@@ -44,7 +45,7 @@ pub fn discover(ports: &[SerialPortInfo]) -> Vec<KvmDevice> {
                         family.iter().any(|node| is_audio(node)),
                     )
                 })
-                .unwrap_or((None, None, false, false, false));
+                .unwrap_or((None, None, None, false, false, false));
 
             Some(KvmDevice {
                 port_name: port.port_name.clone(),
@@ -55,6 +56,7 @@ pub fn discover(ports: &[SerialPortInfo]) -> Vec<KvmDevice> {
                 product_id: Some(info.pid),
                 controller: Some(controller),
                 generation,
+                capture_chip,
                 camera_name,
                 has_hid,
                 has_camera,
@@ -179,8 +181,24 @@ fn is_capture_device(node: &DeviceNode) -> bool {
     let id = node.id.to_ascii_uppercase();
     (id.contains("VID_534D&PID_2109")
         || id.contains("VID_345F&PID_2109")
-        || id.contains("VID_345F&PID_2132"))
+        || id.contains("VID_345F&PID_2132")
+        || id.contains("VID_345F&PID_0001"))
         && !id.contains("&0004")
+}
+
+fn capture_chip(device_id: &str) -> Option<&'static str> {
+    let id = device_id.to_ascii_uppercase();
+    if id.contains("VID_345F&PID_2132") {
+        Some("MS2130S")
+    } else if id.contains("VID_345F&PID_0001") {
+        Some("MS2130S recovery")
+    } else if id.contains("VID_345F&PID_2109") {
+        Some("MS2109S")
+    } else if id.contains("VID_534D&PID_2109") {
+        Some("MS2109")
+    } else {
+        None
+    }
 }
 
 fn descendants<'a>(root: &DeviceNode, nodes: &'a [DeviceNode]) -> Vec<&'a DeviceNode> {

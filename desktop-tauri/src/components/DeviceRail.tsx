@@ -57,6 +57,7 @@ export function DeviceRail({
         <div className="rail-heading"><h2>Status</h2></div>
         <dl className="kv-list">
           <div><dt>Controller</dt><dd>{connected ? selectedDevice?.controller ?? "Online" : "Offline"}</dd></div>
+          <div><dt>Capture chip</dt><dd>{selectedDevice?.captureChip ?? "Not identified"}</dd></div>
           <div><dt>Port</dt><dd className="mono">{connected ? selectedPort || "—" : "—"}</dd></div>
           <div><dt>Target USB</dt><dd>{targetUsb}</dd></div>
           <div><dt>Video input</dt><dd>{videoInput}</dd></div>

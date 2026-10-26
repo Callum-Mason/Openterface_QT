@@ -31,7 +31,7 @@ The installer is written under `src-tauri/target/x86_64-pc-windows-msvc/release/
 ## Current KVM slice
 
 - Enumerates Windows Plug and Play devices and matches the CH9329 (`1A86:7523`) or CH32V208 (`1A86:FE0C`) COM port to a related Mini-KVM capture device.
-- Identifies the three supported device generations and the associated camera, HID, and audio interfaces where Windows exposes them in the same device topology.
+- Identifies the three supported device generations, associated capture-chip family (including MS2130S recovery mode), and camera, HID, and audio interfaces where Windows exposes them in the same device topology.
 - Probes CH9329 at 9600 then 115200 baud with the read-only `GET_INFO` command. CH32V208 uses 115200 baud, resets its HID interface during startup, then retries `GET_INFO` before reporting a connection.
 - Grants the app WebView camera permission for UVC capture; other WebView permission requests retain the runtime default.
 - Captures a connected UVC video input through WebView2 camera access.
