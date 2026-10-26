@@ -1741,8 +1741,10 @@ function App() {
       void sendKeys();
     };
     const release = () => {
-      heldKeys.current.clear();
-      void sendKeys(true);
+      if (heldKeys.current.size) {
+        heldKeys.current.clear();
+        void sendKeys(true);
+      }
       void releaseMouseButtons();
     };
     const releaseOnHide = () => {
