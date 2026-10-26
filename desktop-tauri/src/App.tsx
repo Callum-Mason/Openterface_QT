@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent, WheelEvent } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
@@ -30,6 +30,7 @@ import {
   Video,
   X,
 } from "lucide-react";
+import { isLanguageCode, languageOptions, loadLanguage, setActiveLanguage, translate, type LanguageCode } from "./i18n";
 
 type ExternalDestination = "website" | "purchase" | "feedback" | "releases";
 type ReleaseSummary = { version: string; title: string; notes: string; updateAvailable: boolean };
@@ -85,6 +86,7 @@ type MouseMode = "absolute" | "relative";
 type UsbRoute = "unknown" | "host" | "target";
 type RecordingStatus = "idle" | "recording" | "paused" | "stopping";
 type AppPreferences = {
+  language: LanguageCode;
   preferredControllerPort: string;
   preferredVideoDevice: string;
   preferredAudioDevice: string;
@@ -117,6 +119,8 @@ function readPreference(key: string, fallback = "") {
 type PreferencesDialogProps = {
   open: boolean;
   onClose: () => void;
+  language: LanguageCode;
+  onLanguageChange: (language: LanguageCode) => void;
   devices: KvmDevice[];
   selectedPort: string;
   onSelectPort: (port: string) => void;
@@ -159,7 +163,7 @@ type PreferencesDialogProps = {
 };
 
 function PreferencesDialog({
-  open, onClose, devices, selectedPort, onSelectPort, controllerSelectionDisabled, videoDevices, videoDeviceId,
+  open, onClose, language, onLanguageChange, devices, selectedPort, onSelectPort, controllerSelectionDisabled, videoDevices, videoDeviceId,
   onSelectVideo, capturePreset, onCapturePresetChange, captureSystemShortcuts,
   audioDevices, audioDeviceId, onSelectAudioDevice, onRefreshAudioDevices, audioEnabled, audioStarting, onToggleAudio, audioVolume, onAudioVolumeChange,
   onCaptureSystemShortcutsChange, inhibitScreenSaver, onInhibitScreenSaverChange,
@@ -183,12 +187,20 @@ function PreferencesDialog({
     <div className="preferences-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section className="preferences-dialog" role="dialog" aria-modal="true" aria-labelledby="preferences-title">
         <header className="preferences-header">
-          <div><h2 id="preferences-title">Preferences</h2></div>
+          <div><h2 id="preferences-title">{translate("Preferences")}</h2></div>
           <button className="icon-button" type="button" aria-label="Close preferences" onClick={onClose}><X size={17} /></button>
         </header>
         <div className="preferences-body">
+          <section className="preference-section" aria-labelledby="application-preferences-title">
+            <div className="preference-section-heading"><Settings2 size={16} /><div><h3 id="application-preferences-title">{translate("Application")}</h3><p>{translate("Choose the language used by the application.")}</p></div></div>
+            <label className="preference-field"><span>{translate("Language")}</span>
+              <select value={language} onChange={(event) => { if (isLanguageCode(event.target.value)) onLanguageChange(event.target.value); }}>
+                {languageOptions.map((option) => <option key={option.code} value={option.code}>{option.label}</option>)}
+              </select>
+            </label>
+          </section>
           <section className="preference-section" aria-labelledby="device-preferences-title">
-            <div className="preference-section-heading"><Usb size={16} /><div><h3 id="device-preferences-title">Devices</h3><p>Choose which hardware to use when available.</p></div></div>
+            <div className="preference-section-heading"><Usb size={16} /><div><h3 id="device-preferences-title">{translate("Devices")}</h3><p>{translate("Choose which hardware to use when available.")}</p></div></div>
             <label className="preference-field"><span>Preferred controller</span>
               <select value={selectedPort} onChange={(event) => onSelectPort(event.target.value)} disabled={devices.length === 0 || controllerSelectionDisabled}>
                 {devices.length === 0 && <option value="">No controller detected</option>}
@@ -217,7 +229,7 @@ function PreferencesDialog({
           </section>
 
           <section className="preference-section" aria-labelledby="video-preferences-title">
-            <div className="preference-section-heading"><Camera size={16} /><div><h3 id="video-preferences-title">Video capture</h3><p>Choose a preferred size and frame rate for the USB capture source.</p></div></div>
+            <div className="preference-section-heading"><Camera size={16} /><div><h3 id="video-preferences-title">{translate("Video capture")}</h3><p>{translate("Choose a preferred size and frame rate for the USB capture source.")}</p></div></div>
             <label className="preference-field"><span>Capture quality</span>
               <select value={capturePreset} onChange={(event) => onCapturePresetChange(event.target.value as CapturePreset)}>
                 <option value="720p30">1280 × 720 at 30 fps</option>
@@ -229,7 +241,7 @@ function PreferencesDialog({
           </section>
 
           <section className="preference-section" aria-labelledby="audio-preferences-title">
-            <div className="preference-section-heading"><AudioLines size={16} /><div><h3 id="audio-preferences-title">Audio pass-through</h3><p>Route audio from the selected capture input to the Windows default output.</p></div></div>
+            <div className="preference-section-heading"><AudioLines size={16} /><div><h3 id="audio-preferences-title">{translate("Audio pass-through")}</h3><p>{translate("Route audio from the selected capture input to the Windows default output.")}</p></div></div>
             <label className="preference-field"><span>Audio input</span>
               <select value={audioDeviceId} onChange={(event) => onSelectAudioDevice(event.target.value)} disabled={audioDevices.length === 0 || audioStarting}>
                 {audioDevices.length === 0 && <option value="">No audio inputs detected</option>}
@@ -245,7 +257,7 @@ function PreferencesDialog({
           </section>
 
           <section className="preference-section" aria-labelledby="controller-mode-title">
-            <div className="preference-section-heading"><Usb size={16} /><div><h3 id="controller-mode-title">Target controller mode</h3><p>Choose the USB keyboard and mouse profile presented to the target.</p></div></div>
+            <div className="preference-section-heading"><Usb size={16} /><div><h3 id="controller-mode-title">{translate("Target controller mode")}</h3><p>{translate("Choose the USB keyboard and mouse profile presented to the target.")}</p></div></div>
             <label className="preference-field"><span>Operating mode</span>
               <select value={controllerMode} onChange={(event) => onControllerModeChange(Number(event.target.value))}>
                 <option value={0}>Performance: keyboard, mouse and custom HID</option>
@@ -265,7 +277,7 @@ function PreferencesDialog({
           </section>
 
           <section className="preference-section" aria-labelledby="pointer-preferences-title">
-            <div className="preference-section-heading"><MousePointer2 size={16} /><div><h3 id="pointer-preferences-title">Pointer control</h3><p>Choose how mouse movement reaches the target computer.</p></div></div>
+            <div className="preference-section-heading"><MousePointer2 size={16} /><div><h3 id="pointer-preferences-title">{translate("Pointer control")}</h3><p>{translate("Choose how mouse movement reaches the target computer.")}</p></div></div>
             <label className="preference-field"><span>Mouse mode</span>
               <select value={mouseMode} onChange={(event) => onMouseModeChange(event.target.value as MouseMode)}>
                 <option value="absolute">Absolute: point to a position</option>
@@ -279,7 +291,7 @@ function PreferencesDialog({
           </section>
 
           <section className="preference-section" aria-labelledby="keyboard-preferences-title">
-            <div className="preference-section-heading"><Keyboard size={16} /><div><h3 id="keyboard-preferences-title">Keyboard and Windows</h3><p>Control shortcut forwarding and Windows idle behavior.</p></div></div>
+            <div className="preference-section-heading"><Keyboard size={16} /><div><h3 id="keyboard-preferences-title">{translate("Keyboard and Windows")}</h3><p>{translate("Control shortcut forwarding and Windows idle behavior.")}</p></div></div>
             <label className="preference-field"><span>Target keyboard layout</span>
               <select value={keyboardLayout} onChange={(event) => onKeyboardLayoutChange(event.target.value)}>
                 {keyboardLayouts.map((layout) => <option key={layout.id} value={layout.id}>{layout.name}</option>)}
@@ -570,6 +582,11 @@ function App() {
   const [videoStream, setVideoStream] = useState<MediaStream | null>(null);
   const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
   const [videoDeviceId, setVideoDeviceId] = useState(() => readPreference("preferred-video-device"));
+  const [language, setLanguage] = useState<LanguageCode>(() => {
+    const stored = readPreference("language", "en");
+    return isLanguageCode(stored) ? stored : "en";
+  });
+  const [, setTranslationRevision] = useState(0);
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
   const [audioDeviceId, setAudioDeviceId] = useState(() => readPreference("preferred-audio-device"));
   const [audioEnabled, setAudioEnabled] = useState(false);
@@ -741,6 +758,7 @@ function App() {
       .then((saved) => {
         if (cancelled) return;
         if (saved) {
+          if (isLanguageCode(saved.language)) setLanguage(saved.language);
           setSelectedPort(saved.preferredControllerPort);
           setVideoDeviceId(saved.preferredVideoDevice);
           setAudioDeviceId(saved.preferredAudioDevice || "");
@@ -1257,6 +1275,19 @@ function App() {
   }, [connected, releaseMouseButtons, selectedPort, stopAudio, stopRecording]);
 
   useEffect(() => {
+    let cancelled = false;
+    void loadLanguage(language)
+      .then(() => { if (!cancelled) setTranslationRevision((revision) => revision + 1); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [language]);
+
+  useLayoutEffect(() => {
+    setActiveLanguage(language);
+    setTranslationRevision((revision) => revision + 1);
+  }, [language]);
+
+  useEffect(() => {
     if (!preferencesReady) return;
     void refreshDevices();
     const timer = window.setInterval(() => void refreshDevices(), 4000);
@@ -1623,6 +1654,7 @@ function App() {
   useEffect(() => {
     if (!preferencesReady || !isTauri()) return;
     const preferences: AppPreferences = {
+      language,
       preferredControllerPort: selectedPort,
       preferredVideoDevice: videoDeviceId || readPreference("preferred-video-device"),
       preferredAudioDevice: audioDeviceId || readPreference("preferred-audio-device"),
@@ -1638,7 +1670,7 @@ function App() {
     void invoke("save_preferences", { preferences }).catch((cause) => {
       setError(`Could not save preferences: ${String(cause)}`);
     });
-  }, [appliedControllerMode, audioDeviceId, audioVolume, capturePreset, captureSystemShortcuts, inhibitScreenSaver, keyboardLayout, mouseAutoHide, mouseMode, preferencesReady, selectedPort, videoDeviceId]);
+  }, [appliedControllerMode, audioDeviceId, audioVolume, capturePreset, captureSystemShortcuts, inhibitScreenSaver, keyboardLayout, language, mouseAutoHide, mouseMode, preferencesReady, selectedPort, videoDeviceId]);
 
   useEffect(() => {
     try {
@@ -1789,9 +1821,9 @@ function App() {
           <img src={openterfaceIcon} width="30" height="30" alt="" />
           <div><strong>Openterface</strong><span>Mini-KVM</span></div>
         </div>
-        <div className="topbar-context">Live console</div>
+        <div className="topbar-context">{translate("Live console")}</div>
         <div className="topbar-actions">
-          <span className={`connection-pill ${connected ? "connected" : ""}`} role="status" aria-live="polite">{connected ? "Connected" : "Disconnected"}</span>
+          <span className={`connection-pill ${connected ? "connected" : ""}`} role="status" aria-live="polite">{translate(connected ? "Connected" : "Disconnected")}</span>
           <button className="icon-button" type="button" aria-label="Refresh USB devices" title="Refresh USB devices" onClick={() => void refreshDevices()} disabled={loadingDevices}>
             <RefreshCw size={16} className={loadingDevices ? "spin" : ""} />
           </button>
@@ -1803,36 +1835,36 @@ function App() {
               <MoreHorizontal size={17} />
             </button>
             {appMenuOpen && <div className="app-menu" role="menu" aria-label="Application menu" onKeyDown={navigateApplicationMenu}>
-              <div className="app-menu-heading">Application</div>
-              <button role="menuitem" type="button" onClick={() => { setAppMenuOpen(false); setPreferencesOpen(true); }}><Settings2 size={15} /><span>Preferences</span><kbd>Ctrl+P</kbd></button>
+              <div className="app-menu-heading">{translate("Application")}</div>
+              <button role="menuitem" type="button" onClick={() => { setAppMenuOpen(false); setPreferencesOpen(true); }}><Settings2 size={15} /><span>{translate("Preferences")}</span><kbd>Ctrl+P</kbd></button>
               <button role="menuitem" type="button" onClick={() => void pasteToTarget()} disabled={!connected || appliedControllerMode === 3 || pasting}><ClipboardPaste size={15} /><span>{pasting ? "Pasting to target…" : "Paste to target"}</span><kbd>Ctrl+Shift+V</kbd></button>
               <button role="menuitem" type="button" onClick={() => { setAppMenuOpen(false); takeScreenshot(); }} disabled={!videoStream}><ImageDown size={15} /><span>Save target screenshot</span><kbd>Ctrl+Shift+S</kbd></button>
-              <button role="menuitem" type="button" onClick={() => { setAppMenuOpen(false); setAboutOpen(true); }}><Info size={15} /><span>About Openterface</span><kbd>F1</kbd></button>
+              <button role="menuitem" type="button" onClick={() => { setAppMenuOpen(false); setAboutOpen(true); }}><Info size={15} /><span>{translate("About Openterface")}</span><kbd>F1</kbd></button>
               <button role="menuitem" type="button" onClick={() => { setAppMenuOpen(false); setEnvironmentCopied(false); setEnvironmentOpen(true); }}><Info size={15} /><span>Environment report</span><kbd>Ctrl+E</kbd></button>
               <div className="app-menu-rule" />
               <button role="menuitem" type="button" onClick={() => void openExternalLink("website")}><ExternalLink size={15} /><span>Website</span></button>
               <button role="menuitem" type="button" onClick={() => void openExternalLink("feedback")}><ExternalLink size={15} /><span>Send feedback</span></button>
-              <button role="menuitem" type="button" onClick={() => void checkForUpdates()} disabled={updateChecking}><RefreshCw size={15} /><span>{updateChecking ? "Checking for updates…" : "Check for updates"}</span><kbd>Ctrl+U</kbd></button>
+              <button role="menuitem" type="button" onClick={() => void checkForUpdates()} disabled={updateChecking}><RefreshCw size={15} /><span>{translate(updateChecking ? "Checking for updates…" : "Check for updates")}</span><kbd>Ctrl+U</kbd></button>
               <button role="menuitem" type="button" onClick={() => void openExternalLink("releases")}><ExternalLink size={15} /><span>View releases</span></button>
               <div className="app-menu-rule" />
-              <div className="app-menu-heading">Device</div>
-              <button role="menuitem" type="button" onClick={() => { setAppMenuOpen(false); setResetConfirmationOpen(true); }} disabled={!connected || resettingConnection}><RefreshCw size={15} /><span>{resettingConnection ? "Resetting connection…" : "Reset serial connection"}</span></button>
-              <button role="menuitem" type="button" onClick={() => { setAppMenuOpen(false); setFactoryResetOpen(true); }} disabled={!connected || factoryResetting}><RefreshCw size={15} /><span>{factoryResetting ? "Resetting HID controller…" : "Factory reset HID controller"}</span></button>
+              <div className="app-menu-heading">{translate("Device")}</div>
+              <button role="menuitem" type="button" onClick={() => { setAppMenuOpen(false); setResetConfirmationOpen(true); }} disabled={!connected || resettingConnection}><RefreshCw size={15} /><span>{translate(resettingConnection ? "Resetting connection…" : "Reset serial connection")}</span></button>
+              <button role="menuitem" type="button" onClick={() => { setAppMenuOpen(false); setFactoryResetOpen(true); }} disabled={!connected || factoryResetting}><RefreshCw size={15} /><span>{translate(factoryResetting ? "Resetting HID controller…" : "Factory reset HID controller")}</span></button>
               <div className="app-menu-rule" />
-              <div className="app-menu-heading">Control</div>
+              <div className="app-menu-heading">{translate("Control")}</div>
               <button role="menuitem" type="button" onClick={() => { setAppMenuOpen(false); if (recordingStatus === "idle") startRecording(); else void stopRecording(); }} disabled={!videoStream || recordingStatus === "stopping"}><Circle size={15} /><span>{recordingStatus === "idle" ? "Start video recording" : "Stop and save recording"}</span><kbd>Ctrl+Shift+R</kbd></button>
               <button role="menuitemradio" aria-checked={mouseMode === "absolute"} type="button" onClick={() => switchMouseMode("absolute")}><MousePointer2 size={15} /><span>Absolute mouse</span><kbd>Ctrl+Alt+A</kbd></button>
               <button role="menuitemradio" aria-checked={mouseMode === "relative"} type="button" onClick={() => switchMouseMode("relative")}><MousePointer2 size={15} /><span>Relative mouse</span><kbd>Ctrl+T</kbd></button>
               <div className="app-menu-rule" />
-              <div className="app-menu-heading">View</div>
+              <div className="app-menu-heading">{translate("View")}</div>
               <button role="menuitem" type="button" onClick={() => { setAppMenuOpen(false); zoomIn(); }}><ZoomIn size={15} /><span>Zoom in</span><kbd>Ctrl++</kbd></button>
               <button role="menuitem" type="button" onClick={() => { setAppMenuOpen(false); zoomOut(); }}><ZoomOut size={15} /><span>Zoom out</span><kbd>Ctrl+-</kbd></button>
               <button role="menuitem" type="button" onClick={() => { setAppMenuOpen(false); resetZoom(); }}><ZoomIn size={15} /><span>Actual size</span><kbd>Ctrl+0</kbd></button>
               <div className="app-menu-rule" />
-              <div className="app-menu-heading">Window</div>
-              <button role="menuitem" type="button" onClick={() => { setAppMenuOpen(false); void toggleFullscreen(); }}><Maximize size={15} /><span>{fullscreenActive ? "Exit full screen" : "Full screen"}</span><kbd>Alt+F11</kbd></button>
+              <div className="app-menu-heading">{translate("Window")}</div>
+              <button role="menuitem" type="button" onClick={() => { setAppMenuOpen(false); void toggleFullscreen(); }}><Maximize size={15} /><span>{translate(fullscreenActive ? "Exit full screen" : "Full screen")}</span><kbd>Alt+F11</kbd></button>
               <div className="app-menu-rule" />
-              <button role="menuitem" type="button" onClick={() => void closeWindow()}><X size={15} /><span>Close window</span><kbd>Ctrl+Q</kbd></button>
+              <button role="menuitem" type="button" onClick={() => void closeWindow()}><X size={15} /><span>{translate("Close window")}</span><kbd>Ctrl+Q</kbd></button>
             </div>}
           </div>
         </div>
@@ -1841,7 +1873,7 @@ function App() {
       <main className="main-area">
         <section className="page-content">
           <div className="page-heading">
-            <div><h1>Live console</h1><p>Connect the Mini-KVM to view and control a target computer.</p></div>
+            <div><h1>{translate("Live console")}</h1><p>{translate("Connect the Mini-KVM to view and control a target computer.")}</p></div>
           </div>
 
           <section className="control-strip" aria-label="Connection controls">
@@ -1900,6 +1932,12 @@ function App() {
       <PreferencesDialog
         open={preferencesOpen}
         onClose={() => setPreferencesOpen(false)}
+        language={language}
+        onLanguageChange={(value) => {
+          setActiveLanguage(value);
+          setLanguage(value);
+          try { window.localStorage.setItem("language", value); } catch { /* Preferences still save through Tauri. */ }
+        }}
         devices={devices}
         selectedPort={selectedPort}
         onSelectPort={setSelectedPort}

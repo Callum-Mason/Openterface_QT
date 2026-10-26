@@ -114,6 +114,7 @@ struct KvmDevice {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 struct AppPreferences {
+    language: String,
     preferred_controller_port: String,
     preferred_video_device: String,
     preferred_audio_device: String,
@@ -130,6 +131,7 @@ struct AppPreferences {
 impl Default for AppPreferences {
     fn default() -> Self {
         Self {
+            language: "en".to_string(),
             preferred_controller_port: String::new(),
             preferred_video_device: String::new(),
             preferred_audio_device: String::new(),
@@ -170,6 +172,21 @@ fn load_preferences(app: tauri::AppHandle) -> Result<Option<AppPreferences>, Str
 #[tauri::command]
 fn save_preferences(preferences: AppPreferences, app: tauri::AppHandle) -> Result<(), String> {
     if preferences.preferred_controller_port.len() > 128
+        || !matches!(
+            preferences.language.as_str(),
+            "en" | "fr"
+                | "de"
+                | "da"
+                | "ja"
+                | "se"
+                | "zh"
+                | "es"
+                | "it"
+                | "ko"
+                | "pt"
+                | "ro"
+                | "ru"
+        )
         || preferences.preferred_video_device.len() > 512
         || preferences.preferred_audio_device.len() > 512
         || preferences.audio_volume > 100
