@@ -1221,7 +1221,7 @@ function App() {
     return () => track?.removeEventListener("ended", handleEnded);
   }, [stopRecording, videoStream]);
 
-  const openVideo = useCallback(async (requestedDeviceId?: string, cameraHint?: string | null) => {
+  const openVideo = useCallback(async (requestedDeviceId?: string, cameraHint?: string | null, requireKvmCapture = false) => {
     if (recorderRef.current && recorderRef.current.state !== "inactive") await stopRecording();
     const requestId = ++videoRequestId.current;
     const isCurrentRequest = () => videoRequestId.current === requestId;
@@ -1235,13 +1235,13 @@ function App() {
     setVideoDevices(inputs);
     try {
       const findPreferred = (devices: MediaDeviceInfo[]) => {
-        const savedId = readPreference("preferred-video-device");
-        const saved = devices.find((device) => device.deviceId === savedId);
-        if (saved) return saved;
         const hinted = cameraHint
           ? devices.find((device) => device.label.toLowerCase().includes(cameraHint.toLowerCase()))
           : undefined;
-        return hinted ?? devices.find((device) => /openterface|usb.*(video|capture)|capture.*usb|hdmi/i.test(device.label));
+        const capture = devices.find((device) => /openterface|usb.*(video|capture)|capture.*usb|hdmi/i.test(device.label));
+        const savedId = readPreference("preferred-video-device");
+        const saved = requireKvmCapture ? undefined : devices.find((device) => device.deviceId === savedId);
+        return hinted ?? capture ?? saved;
       };
       let preferred = findPreferred(inputs);
       const { width, height, frameRate } = capturePresetConstraints[capturePreset];
@@ -1260,8 +1260,9 @@ function App() {
       } else if (preferred) {
         try {
           stream = await navigator.mediaDevices.getUserMedia(constraintsFor(preferred.deviceId));
-        } catch {
+        } catch (cause) {
           if (!isCurrentRequest()) return;
+          if (requireKvmCapture) throw cause;
           stream = await navigator.mediaDevices.getUserMedia(constraintsFor());
         }
       } else {
@@ -1279,8 +1280,19 @@ function App() {
       setVideoDevices(inputs);
       if (!requestedDeviceId) {
         preferred = findPreferred(inputs);
+        if (requireKvmCapture && !preferred) {
+          stream.getTracks().forEach((track) => track.stop());
+          setVideoStream((current) => {
+            current?.getTracks().forEach((track) => track.stop());
+            activeVideoStream.current = null;
+            return null;
+          });
+          setVideoError("Could not identify the Mini-KVM capture input. Choose the Openterface video input to reconnect.");
+          setTargetName("No signal");
+          return;
+        }
         const activeId = stream.getVideoTracks()[0]?.getSettings().deviceId;
-        if (preferred && activeId && preferred.deviceId !== activeId) {
+        if (preferred && preferred.deviceId !== activeId) {
           try {
             const preferredStream = await navigator.mediaDevices.getUserMedia(constraintsFor(preferred.deviceId));
             if (!isCurrentRequest()) {
@@ -1290,7 +1302,8 @@ function App() {
             }
             stream.getTracks().forEach((track) => track.stop());
             stream = preferredStream;
-          } catch {
+          } catch (cause) {
+            if (requireKvmCapture) throw cause;
             // Keep the working default stream when the hinted source is unavailable.
           }
         }
@@ -1333,7 +1346,7 @@ function App() {
       setConnectionLabel(message);
       const connectedBaudRate = message.match(/at (\d+) baud/i)?.[1];
       if (connectedBaudRate) setControllerBaudRate(Number(connectedBaudRate));
-      await openVideo(undefined, selectedDevice?.cameraName);
+      await openVideo(undefined, selectedDevice?.cameraName, true);
       await refreshAudioDevices();
     } catch (cause) {
       setError(String(cause));
