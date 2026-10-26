@@ -38,6 +38,8 @@ export type PreferencesDialogProps = {
   onIncludeAudioInRecordingsChange: (enabled: boolean) => void;
   capturePreset: CapturePreset;
   onCapturePresetChange: (preset: CapturePreset) => void;
+  recordingVideoBitrate: number;
+  onRecordingVideoBitrateChange: (bitrate: number) => void;
   captureSystemShortcuts: boolean;
   onCaptureSystemShortcutsChange: (enabled: boolean) => void;
   inhibitScreenSaver: boolean;
@@ -56,6 +58,7 @@ export function PreferencesDialog({
   onSelectVideo, capturePreset, onCapturePresetChange, captureSystemShortcuts,
   audioDevices, audioDeviceId, onSelectAudioDevice, onRefreshAudioDevices, audioEnabled, audioStarting, onToggleAudio, audioVolume, onAudioVolumeChange,
   includeAudioInRecordings, onIncludeAudioInRecordingsChange,
+  recordingVideoBitrate, onRecordingVideoBitrateChange,
   onCaptureSystemShortcutsChange, inhibitScreenSaver, onInhibitScreenSaverChange,
   mouseMode, onMouseModeChange, mouseAutoHide, onMouseAutoHideChange,
   keyboardLayouts, keyboardLayout, onKeyboardLayoutChange,
@@ -113,7 +116,10 @@ export function PreferencesDialog({
             <option value="1080p60">1920 × 1080 at 60 fps</option>
           </select>
         </label>
-        <p className="preference-note">The capture device may use a lower mode if the selected quality is unavailable. Recordings save as WebM.</p>
+        <label className="preference-slider"><span>Recording bitrate <strong>{(recordingVideoBitrate / 1_000_000).toFixed(1)} Mbps</strong></span>
+          <input type="range" min="500000" max="20000000" step="500000" value={recordingVideoBitrate} onChange={(event) => onRecordingVideoBitrateChange(Number(event.target.value))} />
+        </label>
+        <p className="preference-note">The capture device may use a lower mode if the selected quality is unavailable. WebView2 selects the WebM codec and pixel format.</p>
       </section>
 
       <section className="preference-section" aria-labelledby="audio-preferences-title">

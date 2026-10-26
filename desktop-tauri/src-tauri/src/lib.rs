@@ -120,6 +120,7 @@ struct AppPreferences {
     preferred_audio_device: String,
     audio_volume: u8,
     include_audio_in_recordings: bool,
+    recording_video_bitrate: u32,
     capture_quality: String,
     capture_system_shortcuts: bool,
     inhibit_screen_saver: bool,
@@ -138,6 +139,7 @@ impl Default for AppPreferences {
             preferred_audio_device: String::new(),
             audio_volume: 80,
             include_audio_in_recordings: false,
+            recording_video_bitrate: 8_000_000,
             capture_quality: "1080p60".to_string(),
             capture_system_shortcuts: false,
             inhibit_screen_saver: false,
@@ -192,6 +194,7 @@ fn save_preferences(preferences: AppPreferences, app: tauri::AppHandle) -> Resul
         || preferences.preferred_video_device.len() > 512
         || preferences.preferred_audio_device.len() > 512
         || preferences.audio_volume > 100
+        || !(500_000..=20_000_000).contains(&preferences.recording_video_bitrate)
         || preferences.controller_mode > 3
         || !matches!(preferences.mouse_mode.as_str(), "absolute" | "relative")
         || !KEYBOARD_LAYOUTS

@@ -161,6 +161,10 @@ function App() {
     return Number.isInteger(stored) && stored >= 0 && stored <= 100 ? stored : 80;
   });
   const [includeAudioInRecordings, setIncludeAudioInRecordings] = useState(() => readPreference("include-audio-in-recordings") === "true");
+  const [recordingVideoBitrate, setRecordingVideoBitrate] = useState(() => {
+    const stored = Number(readPreference("recording-video-bitrate", "8000000"));
+    return Number.isInteger(stored) && stored >= 500_000 && stored <= 20_000_000 ? stored : 8_000_000;
+  });
   const [capturePreset, setCapturePreset] = useState<CapturePreset>(() => {
     const stored = readPreference("capture-quality", "1080p60");
     return stored in capturePresetConstraints ? stored as CapturePreset : "1080p60";
@@ -331,6 +335,7 @@ function App() {
           setAudioDeviceId(saved.preferredAudioDevice || "");
           setAudioVolume(Number.isInteger(saved.audioVolume) && saved.audioVolume >= 0 && saved.audioVolume <= 100 ? saved.audioVolume : 80);
           setIncludeAudioInRecordings(saved.includeAudioInRecordings);
+          setRecordingVideoBitrate(Number.isInteger(saved.recordingVideoBitrate) && saved.recordingVideoBitrate >= 500_000 && saved.recordingVideoBitrate <= 20_000_000 ? saved.recordingVideoBitrate : 8_000_000);
           setCapturePreset(saved.captureQuality in capturePresetConstraints ? saved.captureQuality : "1080p60");
           setCaptureSystemShortcuts(saved.captureSystemShortcuts);
           setInhibitScreenSaver(saved.inhibitScreenSaver);
@@ -545,7 +550,7 @@ function App() {
       recordingStopPromiseRef.current = null;
       recordingClockRef.current = { elapsedMs: 0, segmentStartedAt: Date.now() };
       setRecordingDurationMs(0);
-      const videoBitsPerSecond = capturePreset === "720p30" ? 2_000_000 : capturePreset === "1080p30" ? 5_000_000 : 8_000_000;
+      const videoBitsPerSecond = recordingVideoBitrate;
       const recordingStream = new MediaStream([
         ...stream.getVideoTracks(),
         ...(audioStream?.getAudioTracks() ?? []),
@@ -599,7 +604,7 @@ function App() {
       setRecordingStatus("idle");
       setError(`Could not start recording: ${String(cause)}`);
     }
-  }, [audioDeviceId, capturePreset, includeAudioInRecordings]);
+  }, [audioDeviceId, includeAudioInRecordings, recordingVideoBitrate]);
 
   const toggleRecordingPause = useCallback(() => {
     const recorder = recorderRef.current;
@@ -1263,6 +1268,7 @@ function App() {
       preferredAudioDevice: audioDeviceId || readPreference("preferred-audio-device"),
       audioVolume,
       includeAudioInRecordings,
+      recordingVideoBitrate,
       captureQuality: capturePreset,
       captureSystemShortcuts,
       inhibitScreenSaver,
@@ -1274,7 +1280,7 @@ function App() {
     void invoke("save_preferences", { preferences }).catch((cause) => {
       setError(`Could not save preferences: ${String(cause)}`);
     });
-  }, [appliedControllerMode, audioDeviceId, audioVolume, capturePreset, captureSystemShortcuts, includeAudioInRecordings, inhibitScreenSaver, keyboardLayout, language, mouseAutoHide, mouseMode, preferencesReady, selectedPort, videoDeviceId]);
+  }, [appliedControllerMode, audioDeviceId, audioVolume, capturePreset, captureSystemShortcuts, includeAudioInRecordings, inhibitScreenSaver, keyboardLayout, language, mouseAutoHide, mouseMode, preferencesReady, recordingVideoBitrate, selectedPort, videoDeviceId]);
 
   useEffect(() => {
     try {
@@ -1291,6 +1297,14 @@ function App() {
       // The Tauri preferences file remains authoritative in the desktop app.
     }
   }, [includeAudioInRecordings]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("recording-video-bitrate", String(recordingVideoBitrate));
+    } catch {
+      // The Tauri preferences file remains authoritative in the desktop app.
+    }
+  }, [recordingVideoBitrate]);
 
   useEffect(() => {
     const shouldCapture = connected && controlActive && captureSystemShortcuts;
@@ -1563,6 +1577,8 @@ function App() {
         onIncludeAudioInRecordingsChange={setIncludeAudioInRecordings}
         capturePreset={capturePreset}
         onCapturePresetChange={setCapturePreset}
+        recordingVideoBitrate={recordingVideoBitrate}
+        onRecordingVideoBitrateChange={setRecordingVideoBitrate}
         captureSystemShortcuts={captureSystemShortcuts}
         onCaptureSystemShortcutsChange={setCaptureSystemShortcuts}
         inhibitScreenSaver={inhibitScreenSaver}
