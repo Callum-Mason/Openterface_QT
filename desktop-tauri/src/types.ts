@@ -2,6 +2,14 @@ import type { LanguageCode } from "./i18n";
 
 export type ExternalDestination = "website" | "purchase" | "feedback" | "releases";
 export type ReleaseSummary = { version: string; title: string; notes: string; updateAvailable: boolean };
+export type FirmwareUpdateCheck = {
+  chip: string;
+  currentVersion: string;
+  latestVersion: string;
+  fileName: string;
+  packageSizeBytes: number;
+  updateAvailable: boolean;
+};
 
 export type KvmDevice = {
   portName: string;

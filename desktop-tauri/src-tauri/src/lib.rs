@@ -85,6 +85,27 @@ mod windows_power;
 struct AppState {
     serial: Arc<Mutex<Option<Box<dyn SerialPort>>>>,
     connection_id: Arc<AtomicU64>,
+    capture_firmware: Arc<Mutex<Option<StagedCaptureFirmware>>>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FirmwareUpdateCheck {
+    chip: String,
+    current_version: String,
+    latest_version: String,
+    file_name: String,
+    package_size_bytes: usize,
+    update_available: bool,
+}
+
+#[allow(dead_code)]
+struct StagedCaptureFirmware {
+    port_name: String,
+    chip: String,
+    version: String,
+    file_name: String,
+    bytes: Vec<u8>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -500,6 +521,44 @@ fn read_capture_firmware_version(port_name: String) -> Result<String, String> {
     {
         let _ = port_name;
         Err("Capture firmware reads are available in Windows builds only".to_string())
+    }
+}
+
+#[tauri::command]
+async fn check_capture_firmware_update(
+    port_name: String,
+    state: State<'_, AppState>,
+) -> Result<FirmwareUpdateCheck, String> {
+    #[cfg(windows)]
+    {
+        let device = list_devices()?
+            .into_iter()
+            .find(|device| device.port_name.eq_ignore_ascii_case(&port_name))
+            .ok_or_else(|| "The selected controller is no longer available".to_string())?;
+        let chip = device.capture_chip.ok_or_else(|| {
+            "Windows could not identify the capture-chip family for this controller".to_string()
+        })?;
+        let hid_instance_ids = windows_devices::capture_hid_instance_ids(&port_name)?;
+        let current_version = windows_capture_firmware::read_version(chip, &hid_instance_ids)?;
+        let (check, bytes) =
+            windows_capture_firmware::check_for_update(chip, &current_version).await?;
+        let staged = check.update_available.then(|| StagedCaptureFirmware {
+            port_name,
+            chip: chip.to_string(),
+            version: check.latest_version.clone(),
+            file_name: check.file_name.clone(),
+            bytes,
+        });
+        let firmware_state = Arc::clone(&state.capture_firmware);
+        *firmware_state
+            .lock()
+            .map_err(|_| "Firmware update state is unavailable".to_string())? = staged;
+        return Ok(check);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (port_name, state);
+        Err("Capture firmware updates are available in Windows builds only".to_string())
     }
 }
 
@@ -1448,6 +1507,7 @@ pub fn run() {
         .manage(AppState {
             serial: Arc::new(Mutex::new(None)),
             connection_id: Arc::new(AtomicU64::new(0)),
+            capture_firmware: Arc::new(Mutex::new(None)),
         })
         .invoke_handler(tauri::generate_handler![
             load_preferences,
@@ -1457,6 +1517,7 @@ pub fn run() {
             open_external_link,
             list_devices,
             read_capture_firmware_version,
+            check_capture_firmware_update,
             connect_device,
             apply_controller_mode,
             apply_baud_rate,

@@ -9,7 +9,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { open as openFile } from "@tauri-apps/plugin-fs";
 import { Camera, Settings2, Video, X } from "lucide-react";
 import { isLanguageCode, loadLanguage, setActiveLanguage, type LanguageCode } from "./i18n";
-import type { AppPreferences, CapturePreset, ControllerStatus, ExternalDestination, KeyboardLayoutInfo, KvmDevice, MouseMode, RecordingStatus, ReleaseSummary, UsbRoute } from "./types";
+import type { AppPreferences, CapturePreset, ControllerStatus, ExternalDestination, FirmwareUpdateCheck, KeyboardLayoutInfo, KvmDevice, MouseMode, RecordingStatus, ReleaseSummary, UsbRoute } from "./types";
 import { AboutDialog } from "./components/AboutDialog";
 import { AppMenu, type AppMenuActions } from "./components/AppMenu";
 import { CommandBar } from "./components/CommandBar";
@@ -203,6 +203,8 @@ function App() {
   const [firmwareDialogOpen, setFirmwareDialogOpen] = useState(false);
   const [firmwareVersion, setFirmwareVersion] = useState("");
   const [firmwareVersionLoading, setFirmwareVersionLoading] = useState(false);
+  const [firmwareChecking, setFirmwareChecking] = useState(false);
+  const [firmwareUpdateCheck, setFirmwareUpdateCheck] = useState<FirmwareUpdateCheck | null>(null);
   const [firmwareVersionError, setFirmwareVersionError] = useState("");
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
   const [updateChecking, setUpdateChecking] = useState(false);
@@ -345,6 +347,22 @@ function App() {
       setFirmwareVersionError(String(cause));
     } finally {
       setFirmwareVersionLoading(false);
+    }
+  };
+
+  const checkCaptureFirmwareUpdate = async () => {
+    if (!selectedPort) return;
+    setFirmwareChecking(true);
+    setFirmwareVersionError("");
+    setFirmwareUpdateCheck(null);
+    try {
+      const result = await invoke<FirmwareUpdateCheck>("check_capture_firmware_update", { portName: selectedPort });
+      setFirmwareUpdateCheck(result);
+      setFirmwareVersion(result.currentVersion);
+    } catch (cause) {
+      setFirmwareVersionError(String(cause));
+    } finally {
+      setFirmwareChecking(false);
     }
   };
 
@@ -1614,7 +1632,7 @@ function App() {
     factoryReset: () => setFactoryResetOpen(true),
     environment: () => { setEnvironmentCopied(false); setEnvironmentOpen(true); },
     diagnostics: () => { setDiagnosticsCopied(false); setDiagnosticsOpen(true); },
-    firmware: () => { setFirmwareVersion(""); setFirmwareVersionError(""); setFirmwareDialogOpen(true); },
+    firmware: () => { setFirmwareVersion(""); setFirmwareVersionError(""); setFirmwareUpdateCheck(null); setFirmwareDialogOpen(true); },
     checkForUpdates: () => void checkForUpdates(),
     about: () => setAboutOpen(true),
     website: () => void openExternalLink("website"),
@@ -1774,7 +1792,7 @@ function App() {
       <AboutDialog open={aboutOpen} version={appVersion} onClose={() => setAboutOpen(false)} onOpenLink={(destination) => void openExternalLink(destination)} />
       <EnvironmentDialog open={environmentOpen} rows={environmentRows} copied={environmentCopied} onClose={() => setEnvironmentOpen(false)} onCopy={() => void copyEnvironmentReport()} />
       <DiagnosticsDialog open={diagnosticsOpen} checks={diagnosticChecks} running={diagnosticsRunning} lastChecked={diagnosticsLastChecked} copied={diagnosticsCopied} onRefresh={() => void runDiagnostics()} onClose={() => setDiagnosticsOpen(false)} onCopy={() => void copyDiagnosticsReport()} />
-      <FirmwareDialog open={firmwareDialogOpen} chip={selectedDevice?.captureChip ?? null} portName={selectedPort} version={firmwareVersion} loading={firmwareVersionLoading} error={firmwareVersionError} onReadVersion={() => void readCaptureFirmwareVersion()} onClose={() => setFirmwareDialogOpen(false)} />
+      <FirmwareDialog open={firmwareDialogOpen} chip={selectedDevice?.captureChip ?? null} portName={selectedPort} version={firmwareVersion} reading={firmwareVersionLoading} checking={firmwareChecking} updateCheck={firmwareUpdateCheck} error={firmwareVersionError} onReadVersion={() => void readCaptureFirmwareVersion()} onCheckUpdate={() => void checkCaptureFirmwareUpdate()} onClose={() => setFirmwareDialogOpen(false)} />
       <UpdateDialog open={updateDialogOpen} currentVersion={appVersion} release={latestRelease} loading={updateChecking} error={updateCheckError} onClose={() => setUpdateDialogOpen(false)} onOpenReleases={() => void openExternalLink("releases")} />
       <ResetConfirmationDialog open={resetConfirmationOpen} busy={resettingConnection} onClose={() => setResetConfirmationOpen(false)} onConfirm={() => void resetSerialConnection()} />
       <FactoryResetDialog open={factoryResetOpen} busy={factoryResetting} onClose={() => setFactoryResetOpen(false)} onConfirm={() => void factoryResetController()} />
