@@ -54,6 +54,14 @@ const capturePresetConstraints: Record<CapturePreset, { width: number; height: n
   "1080p30": { width: 1920, height: 1080, frameRate: 30 },
 };
 
+type MouseReportCommand = "send_mouse_report" | "send_relative_mouse_report";
+type MouseReportJob = {
+  command: MouseReportCommand;
+  payload: Record<string, number>;
+  coalesceMoves: boolean;
+  completions: Array<() => void>;
+};
+
 function readPreference(key: string, fallback = "") {
   try {
     return window.localStorage.getItem(key) ?? fallback;
@@ -262,7 +270,8 @@ function App() {
   const keyboardSendQueue = useRef<Promise<void>>(Promise.resolve());
   const lastKeyboardActivity = useRef(0);
   const heldButtons = useRef(0);
-  const mouseSendQueue = useRef<Promise<void>>(Promise.resolve());
+  const mouseReportJobs = useRef<MouseReportJob[]>([]);
+  const mouseReportPumpRunning = useRef(false);
   const lastMouseSend = useRef(0);
   const lastMousePosition = useRef({ x: 0, y: 0 });
   const pointerLockIntent = useRef(false);
@@ -975,12 +984,35 @@ function App() {
     }, "image/png");
   }, []);
 
-  const queueMouseReport = useCallback((command: "send_mouse_report" | "send_relative_mouse_report", payload: Record<string, number>) => {
-    mouseSendQueue.current = mouseSendQueue.current
-      .catch(() => undefined)
-      .then(() => invoke<void>(command, payload))
-      .catch((cause) => { setError(String(cause)); });
-    return mouseSendQueue.current;
+  const queueMouseReport = useCallback((command: MouseReportCommand, payload: Record<string, number>, coalesceMoves = false) => {
+    const completion = new Promise<void>((resolve) => {
+      const jobs = mouseReportJobs.current;
+      const lastJob = jobs[jobs.length - 1];
+      if (coalesceMoves && lastJob?.coalesceMoves) {
+        lastJob.command = command;
+        lastJob.payload = payload;
+        lastJob.completions.push(resolve);
+      } else {
+        jobs.push({ command, payload, coalesceMoves, completions: [resolve] });
+      }
+
+      if (mouseReportPumpRunning.current) return;
+      mouseReportPumpRunning.current = true;
+      void (async () => {
+        while (mouseReportJobs.current.length) {
+          const job = mouseReportJobs.current.shift()!;
+          try {
+            await invoke<void>(job.command, job.payload);
+          } catch (cause) {
+            setError(String(cause));
+          } finally {
+            job.completions.forEach((finish) => finish());
+          }
+        }
+        mouseReportPumpRunning.current = false;
+      })();
+    });
+    return completion;
   }, []);
 
   const releaseMouseButtons = useCallback(async () => {
@@ -1732,12 +1764,12 @@ function App() {
       const heightRatio = window.screen.height > 0 ? window.innerHeight / window.screen.height : 1;
       const dx = Math.max(-127, Math.min(127, Math.trunc(event.movementX * widthRatio)));
       const dy = Math.max(-127, Math.min(127, Math.trunc(event.movementY * heightRatio)));
-      void queueMouseReport("send_relative_mouse_report", { dx, dy, buttons: heldButtons.current, wheel: 0 });
+      void queueMouseReport("send_relative_mouse_report", { dx, dy, buttons: heldButtons.current, wheel: 0 }, event.type === "pointermove");
       return;
     }
     const { x, y } = targetCoordinates(event, videoRef.current, videoZoom);
     lastMousePosition.current = { x, y };
-    void queueMouseReport("send_mouse_report", { x, y, buttons: heldButtons.current, wheel: 0 });
+    void queueMouseReport("send_mouse_report", { x, y, buttons: heldButtons.current, wheel: 0 }, event.type === "pointermove");
   };
 
   const setPointerButton = (event: PointerEvent<HTMLVideoElement>, pressed: boolean) => {
@@ -1864,8 +1896,8 @@ function App() {
             onToggleFullscreen={() => void toggleFullscreen()}
           />
 
-          <div className={`video-stage ${videoStream ? "has-video" : ""} ${mouseAutoHide && controlActive ? "auto-hide-cursor" : ""}`} tabIndex={connected ? 0 : -1} aria-label={connected ? "Target display, keyboard and mouse control active when focused" : "Target display unavailable until a device is connected"} onPointerEnter={() => setControlActive(true)} onPointerLeave={() => { setControlActive(false); if (heldKeys.current.size) { heldKeys.current.clear(); void sendKeys(); } void releaseMouseButtons(); }} onFocus={() => setControlActive(true)}>
-            {videoStream ? <video ref={videoRef} style={{ transform: `scale(${videoZoom})` }} autoPlay playsInline muted onContextMenu={(event) => event.preventDefault()} onPointerMove={sendPointer} onPointerDown={(event) => setPointerButton(event, true)} onPointerUp={(event) => setPointerButton(event, false)} onPointerCancel={() => void releaseMouseButtons()} onPointerLeave={(event) => { if (heldButtons.current) { heldButtons.current = 0; sendPointer(event); } }} onWheel={scroll} /> : <div className="empty-display">
+          <div className={`video-stage ${videoStream ? "has-video" : ""} ${mouseAutoHide && controlActive ? "auto-hide-cursor" : ""}`} tabIndex={connected ? 0 : -1} aria-label={connected ? "Target display, keyboard and mouse control active when focused" : "Target display unavailable until a device is connected"} onPointerEnter={() => setControlActive(true)} onPointerLeave={() => { setControlActive(false); if (heldKeys.current.size) { heldKeys.current.clear(); void sendKeys(); } }} onFocus={() => setControlActive(true)}>
+            {videoStream ? <video ref={videoRef} style={{ transform: `scale(${videoZoom})` }} autoPlay playsInline muted onContextMenu={(event) => event.preventDefault()} onPointerMove={sendPointer} onPointerDown={(event) => setPointerButton(event, true)} onPointerUp={(event) => setPointerButton(event, false)} onPointerCancel={() => void releaseMouseButtons()} onWheel={scroll} /> : <div className="empty-display">
               <Video size={20} strokeWidth={1.5} aria-hidden="true" />
               <div className="empty-copy"><h2>{connected ? "No video signal" : "No target display"}</h2><p>{connected ? "Waiting for the Mini-KVM capture input." : "Connect a Mini-KVM to view its video input."}</p></div>
             </div>}
