@@ -62,6 +62,13 @@ type MouseReportJob = {
   completions: Array<() => void>;
 };
 
+type ControllerConnection = {
+  message: string;
+  baudRate: number;
+  controllerMode: number | null;
+  modeWarning: string | null;
+};
+
 function readPreference(key: string, fallback = "") {
   try {
     return window.localStorage.getItem(key) ?? fallback;
@@ -1392,13 +1399,18 @@ function App() {
     setConnecting(true);
     setError("");
     try {
-      const message = await invoke<string>("connect_device", { portName: selectedPort });
+      const result = await invoke<ControllerConnection>("connect_device", { portName: selectedPort });
+      if (result.controllerMode !== null) {
+        setControllerMode(result.controllerMode);
+        setAppliedControllerMode(result.controllerMode);
+      } else if (result.modeWarning) {
+        setNoticeMessage(`Could not read the controller mode; using the saved setting. ${result.modeWarning}`);
+      }
       setConnected(true);
       setUsbRoute("unknown");
       setControllerStatus(null);
-      setConnectionLabel(message);
-      const connectedBaudRate = message.match(/at (\d+) baud/i)?.[1];
-      if (connectedBaudRate) setControllerBaudRate(Number(connectedBaudRate));
+      setConnectionLabel(result.message);
+      setControllerBaudRate(result.baudRate);
       await openVideo(selectedDevice?.cameraName);
       await refreshAudioDevices();
     } catch (cause) {

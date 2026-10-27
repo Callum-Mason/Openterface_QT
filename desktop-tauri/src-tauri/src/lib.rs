@@ -130,6 +130,15 @@ struct ControllerStatus {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct ControllerConnection {
+    message: String,
+    baud_rate: u32,
+    controller_mode: Option<u8>,
+    mode_warning: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct KvmDevice {
     port_name: String,
     manufacturer: Option<String>,
@@ -718,7 +727,7 @@ fn connect_device(
     port_name: String,
     state: State<'_, AppState>,
     app: tauri::AppHandle,
-) -> Result<String, String> {
+) -> Result<ControllerConnection, String> {
     let devices = list_devices()?;
     let device = devices
         .iter()
@@ -767,6 +776,17 @@ fn connect_device(
                 probe_errors.join("; ")
             )
         })?;
+    let (controller_mode, mode_warning) = if device.controller == Some("CH9329") {
+        match read_controller_mode(port.as_mut()) {
+            Ok(mode) => (Some(mode), None),
+            Err(error) => (None, Some(error)),
+        }
+    } else if device.controller == Some("CH32V208") {
+        // This controller exposes keyboard and mouse without CH9329 mode selection.
+        (Some(2), None)
+    } else {
+        (None, None)
+    };
     port.set_timeout(Duration::from_millis(3))
         .map_err(|error| format!("Could not configure controller response polling: {error}"))?;
 
@@ -789,7 +809,37 @@ fn connect_device(
         }
         return Err(error);
     }
-    Ok(format!("Connected to {port_name} at {baud_rate} baud"))
+    Ok(ControllerConnection {
+        message: format!("Connected to {port_name} at {baud_rate} baud"),
+        baud_rate,
+        controller_mode,
+        mode_warning,
+    })
+}
+
+fn parse_controller_mode(response: &[u8]) -> Result<u8, String> {
+    if response.len() != 56 {
+        return Err(format!("The controller returned a configuration of {} bytes instead of 56", response.len()));
+    }
+    if response[..3] != [0x57, 0xab, 0x00] || !matches!(response[3], 0x08 | 0x88) || response[4] != 0x32 {
+        return Err("The controller configuration header is invalid".to_string());
+    }
+    let checksum = response[..55].iter().fold(0u8, |sum, byte| sum.wrapping_add(*byte));
+    if checksum != response[55] {
+        return Err(format!("The controller configuration checksum did not match (expected {checksum:02x}, got {:02x})", response[55]));
+    }
+    if !matches!(response[5], 0x00..=0x03 | 0x80..=0x83) {
+        return Err(format!("The controller returned an unsupported mode {}", response[5]));
+    }
+    // Bit 7 indicates that the mode comes from the controller's hardware pins.
+    Ok(response[5] & 0x03)
+}
+
+fn read_controller_mode(port: &mut dyn SerialPort) -> Result<u8, String> {
+    send_controller_command(port, 0x08, &[])
+        .map_err(|error| format!("Could not request the controller operating mode: {error}"))?;
+    let response = read_controller_response(port, 0x08, Duration::from_secs(1))?;
+    parse_controller_mode(&response)
 }
 
 fn read_controller_response(
@@ -1754,4 +1804,35 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running Openterface Mini-KVM");
+}
+
+#[cfg(test)]
+mod controller_mode_tests {
+    use super::parse_controller_mode;
+
+    fn configuration(mode: u8) -> Vec<u8> {
+        let mut frame = vec![0u8; 56];
+        frame[..6].copy_from_slice(&[0x57, 0xab, 0x00, 0x88, 0x32, mode]);
+        frame[55] = frame[..55]
+            .iter()
+            .fold(0u8, |sum, byte| sum.wrapping_add(*byte));
+        frame
+    }
+
+    #[test]
+    fn reads_the_mode_from_a_valid_configuration() {
+        for mode in 0..=3 {
+            assert_eq!(parse_controller_mode(&configuration(mode)), Ok(mode));
+            assert_eq!(parse_controller_mode(&configuration(mode | 0x80)), Ok(mode));
+        }
+    }
+
+    #[test]
+    fn rejects_corrupt_short_or_unknown_configurations() {
+        assert!(parse_controller_mode(&configuration(4)).is_err());
+        assert!(parse_controller_mode(&configuration(2)[..20]).is_err());
+        let mut corrupt = configuration(2);
+        corrupt[8] ^= 1;
+        assert!(parse_controller_mode(&corrupt).is_err());
+    }
 }
