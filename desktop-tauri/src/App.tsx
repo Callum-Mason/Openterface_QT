@@ -9,7 +9,7 @@ import { open as openDialog, save } from "@tauri-apps/plugin-dialog";
 import { open as openFile } from "@tauri-apps/plugin-fs";
 import { Settings2, Video, X } from "lucide-react";
 import { isLanguageCode, loadLanguage, setActiveLanguage, type LanguageCode } from "./i18n";
-import { mergeMouseMoves, splitRelativeMove, type MouseReportCommand } from "./mouseMotion";
+import { mergeMouseMoves, MouseMoveLimiter, splitRelativeMove, type MouseReportCommand } from "./mouseMotion";
 import type { AppPreferences, CapturePreset, ControllerStatus, ExternalDestination, FirmwareUpdateCheck, KeyboardLayoutInfo, KvmDevice, MouseMode, RecordingStatus, ReleaseSummary, UsbRoute } from "./types";
 import { AboutDialog } from "./components/AboutDialog";
 import { AppMenu, type AppMenuActions } from "./components/AppMenu";
@@ -278,7 +278,7 @@ function App() {
   const heldButtons = useRef(0);
   const mouseReportJobs = useRef<MouseReportJob[]>([]);
   const mouseReportPumpRunning = useRef(false);
-  const lastMouseSend = useRef(0);
+  const mouseMoveLimiter = useRef<MouseMoveLimiter | null>(null);
   const lastMousePosition = useRef({ x: 0, y: 0 });
   const pointerLockIntent = useRef(false);
   const selectedDevice = devices.find((device) => device.portName === selectedPort);
@@ -1031,7 +1031,16 @@ function App() {
     return completion;
   }, []);
 
+  if (!mouseMoveLimiter.current) {
+    mouseMoveLimiter.current = new MouseMoveLimiter((command, payload) => {
+      void queueMouseReport(command, payload, true);
+    });
+  }
+
+  useEffect(() => () => mouseMoveLimiter.current?.cancel(), []);
+
   const releaseMouseButtons = useCallback(async () => {
+    mouseMoveLimiter.current?.flush();
     if (!heldButtons.current) return;
     heldButtons.current = 0;
     if (mouseMode === "relative") {
@@ -1210,6 +1219,7 @@ function App() {
         if (connected) {
           await stopRecording();
           stopAudio();
+          mouseMoveLimiter.current?.cancel();
           await releaseMouseButtons();
           pointerLockIntent.current = false;
           if (document.pointerLockElement) document.exitPointerLock();
@@ -1422,6 +1432,7 @@ function App() {
 
   const disconnect = async () => {
     videoRequestId.current += 1;
+    mouseMoveLimiter.current?.cancel();
     await stopRecording();
     stopAudio();
     heldKeys.current.clear();
@@ -1779,13 +1790,12 @@ function App() {
 
   const sendPointer = (event: PointerEvent<HTMLVideoElement>) => {
     if (!connected || appliedControllerMode === 1 || appliedControllerMode === 3 || !videoRef.current) return;
-    const now = performance.now();
-    const pointerReportInterval = 16;
     // Mouse button chords can change on pointermove: pointerdown/up only fire
     // when the first button is pressed or the last button is released.
     const buttons = event.buttons & 7;
     const buttonsChanged = event.type === "pointermove" && heldButtons.current !== buttons;
     if (buttonsChanged) {
+      mouseMoveLimiter.current?.flush();
       heldButtons.current = buttons;
       if (mouseMode === "relative") {
         void queueMouseReport("send_relative_mouse_report", { dx: 0, dy: 0, buttons, wheel: 0 });
@@ -1793,7 +1803,6 @@ function App() {
         const { x, y } = targetCoordinates(event, videoRef.current, videoZoom);
         lastMousePosition.current = { x, y };
         void queueMouseReport("send_mouse_report", { x, y, buttons, wheel: 0 });
-        lastMouseSend.current = now;
         return;
       }
     }
@@ -1801,14 +1810,16 @@ function App() {
       const dx = event.type === "pointermove" ? event.movementX : 0;
       const dy = event.type === "pointermove" ? event.movementY : 0;
       if (event.type === "pointermove" && dx === 0 && dy === 0) return;
-      void queueMouseReport("send_relative_mouse_report", { dx, dy, buttons: heldButtons.current, wheel: 0 }, event.type === "pointermove");
+      const report = { dx, dy, buttons: heldButtons.current, wheel: 0 };
+      if (event.type === "pointermove") mouseMoveLimiter.current?.push("send_relative_mouse_report", report);
+      else void queueMouseReport("send_relative_mouse_report", report);
       return;
     }
-    if (event.type === "pointermove" && now - lastMouseSend.current < pointerReportInterval) return;
-    lastMouseSend.current = now;
     const { x, y } = targetCoordinates(event, videoRef.current, videoZoom);
     lastMousePosition.current = { x, y };
-    void queueMouseReport("send_mouse_report", { x, y, buttons: heldButtons.current, wheel: 0 }, event.type === "pointermove");
+    const report = { x, y, buttons: heldButtons.current, wheel: 0 };
+    if (event.type === "pointermove") mouseMoveLimiter.current?.push("send_mouse_report", report);
+    else void queueMouseReport("send_mouse_report", report);
   };
 
   const setPointerButton = (event: PointerEvent<HTMLVideoElement>, pressed: boolean) => {
@@ -1816,6 +1827,7 @@ function App() {
     if (appliedControllerMode === 1 || appliedControllerMode === 3) return;
     const buttons = event.buttons & 7;
     if (buttons === heldButtons.current) return;
+    mouseMoveLimiter.current?.flush();
     if (mouseMode === "relative" && pressed && buttons) requestPointerCapture();
     if (pressed && buttons && mouseMode === "absolute") {
       try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* The pointer may have been cancelled by the window manager. */ }
@@ -1833,6 +1845,7 @@ function App() {
   const scroll = (event: WheelEvent<HTMLVideoElement>) => {
     event.preventDefault();
     if (!connected || appliedControllerMode === 1 || appliedControllerMode === 3 || !videoRef.current) return;
+    mouseMoveLimiter.current?.flush();
     const wheel = Math.max(-127, Math.min(127, Math.trunc(-event.deltaY / 50)));
     if (mouseMode === "relative") {
       void queueMouseReport("send_relative_mouse_report", { dx: 0, dy: 0, buttons: heldButtons.current, wheel });
