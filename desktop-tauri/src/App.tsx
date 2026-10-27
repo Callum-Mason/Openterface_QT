@@ -10,6 +10,7 @@ import { open as openFile } from "@tauri-apps/plugin-fs";
 import { Settings2, Video, X } from "lucide-react";
 import { isLanguageCode, loadLanguage, setActiveLanguage, type LanguageCode } from "./i18n";
 import { mergeMouseMoves, MouseMoveLimiter, splitRelativeMove, type MouseReportCommand } from "./mouseMotion";
+import { updateHeldKey } from "./keyboardState";
 import type { AppPreferences, CapturePreset, ControllerStatus, ExternalDestination, FirmwareUpdateCheck, KeyboardLayoutInfo, KvmDevice, MouseMode, RecordingStatus, ReleaseSummary, UsbRoute } from "./types";
 import { AboutDialog } from "./components/AboutDialog";
 import { AppMenu, type AppMenuActions } from "./components/AppMenu";
@@ -1716,9 +1717,8 @@ function App() {
         return;
       }
       unlisten = await listen<{ code: string; down: boolean }>("system-key-event", ({ payload }) => {
-        if (payload.down) heldKeys.current.add(payload.code);
-        else heldKeys.current.delete(payload.code);
-        void sendKeys();
+        if (disposed) return;
+        if (updateHeldKey(heldKeys.current, payload.code, payload.down)) void sendKeys();
       });
       if (disposed) {
         unlisten?.();
@@ -1753,15 +1753,13 @@ function App() {
       if (!keyUsages[event.code] && !modifierBits[event.code]) return;
       event.preventDefault();
       if (event.repeat) return;
-      heldKeys.current.add(event.code);
-      void sendKeys();
+      if (updateHeldKey(heldKeys.current, event.code, true)) void sendKeys();
     };
     const up = (event: KeyboardEvent) => {
       if (!keyUsages[event.code] && !modifierBits[event.code]) return;
       if (!controlActive && !heldKeys.current.has(event.code)) return;
       event.preventDefault();
-      heldKeys.current.delete(event.code);
-      void sendKeys();
+      if (updateHeldKey(heldKeys.current, event.code, false)) void sendKeys();
     };
     const release = () => {
       if (heldKeys.current.size) {
